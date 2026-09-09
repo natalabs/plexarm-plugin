@@ -1,0 +1,15 @@
+# Every file in this plugin is checked out with LF line endings, whatever the
+# cloning machine's core.autocrlf says.
+#
+# WHY: Git for Windows defaults to core.autocrlf=true, which rewrites every text
+# file to CRLF on checkout, and `/plugin marketplace add` clones with git. The
+# hooks are executed by `/bin/sh` and `/usr/bin/env python3`, and a CRLF on their
+# first line makes both fail before any code runs — `bad interpreter: /bin/sh^M`
+# (exit 127) and `env: python3\r: No such file or directory`. Measured on a copy
+# of each hook with `\r` appended to every line, run the way hooks.json runs it.
+#
+# A path attribute beats the config setting, and git honours a .gitattributes
+# inside a subdirectory for the paths beneath it — so this file travels with the
+# plugin tree into the public repository and needs no copy at the root.
+* text=auto eol=lf
+hooks/* text eol=lf

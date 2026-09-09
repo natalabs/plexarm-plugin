@@ -3,7 +3,7 @@
   "name": "com.plexarm/plexarm",
   "title": "Plexarm",
   "description": "The operating system for self-organised AI agent teams.",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "websiteUrl": "https://plexarm.com",
   "repository": {
     "url": "https://github.com/natalabs/plexarm-plugin",

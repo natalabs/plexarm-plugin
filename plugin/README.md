@@ -22,11 +22,38 @@ explains how the method works, and an agent that keeps the record itself in orde
 ```
 
 
+### Prerequisites
+
+The MCP tools need nothing beyond Claude Code and a token. **The four hooks are scripts**, and they
+need two things Claude Code itself does not: **Python 3.10 or newer, reachable on your PATH as
+`python3`**, and a **POSIX shell** at `/bin/sh`. macOS and Linux normally have both. On Windows,
+install Python 3 and [Git for Windows](https://gitforwindows.org/) — Git Bash provides the shell.
+Without them the MCP tools still work and only the four hooks are inert: Claude Code reports a hook
+error at the moments they would have run, and that error is the hooks failing to start, not the
+product failing.
+
+The plugin is platform-agnostic by design and verified on macOS. Linux and Windows are unverified as
+of 2026-09-07. If you run it there, tell us what happened — <https://plexarm.com>.
+
+### Your token
+
 You need a **Plexarm API token**. Create one at <https://plexarm.com/me> — it is shown once.
 
 **Export it as `PLEXARM_TOKEN`, from wherever you keep secrets** — your own keychain item, a secrets
 manager, your shell profile. That is the path the MCP server and every hook read **first** as of
-1.4.1, and no step here asks you to edit JSON by hand.
+1.4.1, and no step here asks you to edit JSON by hand. How you set it depends on where you launch
+Claude Code from:
+
+| | |
+|---|---|
+| **macOS or Linux, from a terminal** | `export PLEXARM_TOKEN=<your token>` in the profile that terminal reads — `~/.zshrc` or `~/.bashrc` — then open a new terminal |
+| **Windows, PowerShell** | `$env:PLEXARM_TOKEN = "<your token>"` in your profile (`notepad $PROFILE`), then open a new window — or `setx PLEXARM_TOKEN <your token>` once, which stores it for every future process of your user account, then restart the terminal |
+| **Windows, CMD** | `setx PLEXARM_TOKEN <your token>`, then open a new window |
+| **A client launched from the Dock or the Start menu** | Apps launched from the Dock or Start menu do not see shell exports. Launch from a terminal, or use the client's secret prompt. On macOS, `launchctl setenv PLEXARM_TOKEN <your token>` reaches Dock-launched apps until you next log out; on Linux, a line `PLEXARM_TOKEN=<your token>` in `~/.config/environment.d/plexarm.conf` reaches the desktop session after you sign in again; on Windows, `setx` already covers it |
+
+Whichever row you use, the token is stored in plain text somewhere only your user account can read —
+a shell profile, the PowerShell profile, the Windows registry. That is the same posture as any
+other API key on your machine. If you would rather not, use the client's own prompt, described next.
 
 > ⚠️ **The token prompt at enable time still works and is now the FALLBACK, not the recommendation.**
 > Values given there land in the client's shared `Claude Code-credentials` keychain item, which is
@@ -305,10 +332,13 @@ what binds the hook to a project. Without it the guard never blocks in that repo
 A plugin runs with your privileges, and Anthropic does not verify what is in a third-party one. That
 cuts both ways, so:
 
-- **Every file in here is meant to be read.** There are eleven counting this one: a manifest, an MCP
-  config, a licence, this README, a skill, an agent, a hook registration and the **four** hook
-  scripts it points at. That is the whole plugin. *(This bullet said seven and named two hook
-  scripts until 1.5.0; 1.3.0 and 1.4.0 each added one and the count was not corrected with them.)*
+- **Every file in here is meant to be read.** There are twelve counting this one: a manifest, an MCP
+  config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
+  scripts it points at, and a `.gitattributes` that pins every file here to LF line endings so a
+  Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the hooks' first line
+  into a shebang no shell can find. That is the whole plugin. *(This bullet said seven and named two
+  hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one and the count was not corrected with
+  them. It said eleven until the `.gitattributes` was added on 2026-09-09.)*
 - **The hooks are the part to read first**, because they are the only things here that execute.
   The agent and the skill are prose — they instruct Claude and run nothing.
   `subagent_start_context.sh` is mostly comments — **ten** lines actually execute, and what they do
