@@ -1,0 +1,57 @@
+Plexarm Plugin Licence 1.0
+Copyright (c) 2026 Nata Labs. All rights reserved.
+
+This licence covers the files in this plugin. It does not grant any right to the
+Plexarm service those files connect to; access to the service is governed
+separately by the terms you accepted when you created an account.
+
+WHAT YOU MAY DO
+
+You may install, run and use this plugin on any machine you control, for your own
+work and for the work of the organisation whose Plexarm account you are using.
+That includes commercial use. You may read every file in it — you are encouraged
+to, before you install it — and you may modify your own copy locally to suit how
+you work.
+
+WHAT YOU MAY NOT DO
+
+You may not redistribute this plugin, modified or unmodified, whether on its own,
+inside another product, or through any marketplace or registry. You may not
+sublicense, sell or rent it. You may not use it to build or assist in building a
+competing product, and you may not present it or any part of it as your own work.
+
+NO TRANSFER OF RIGHTS
+
+Nothing here transfers ownership of anything. This is permission to use, not a
+grant of the underlying work.
+
+TERMINATION
+
+This permission ends if you breach it, and it ends if your Plexarm account is
+closed or suspended. On termination, stop using the plugin and delete your copy.
+
+NO WARRANTY
+
+THIS PLUGIN IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THIS PLUGIN OR ITS USE.
+
+---
+
+A NOTE ON WHAT THIS DOES AND DOES NOT DO, because pretending otherwise would be
+dishonest:
+
+Claude Code has no licence enforcement, no entitlement checking and no billing.
+The `license` field in a plugin manifest is a string nobody reads. This document
+is therefore a statement of terms — the thing a reviewer or a legal team looks
+for — and it is not a control.
+
+The actual control is the API token. Every call this plugin's MCP server makes is
+validated server-side against your account. That is where access is granted and
+revoked, and it is the only place it could meaningfully live, because everything
+in this directory is on your disk and readable by you.
+
+Questions: https://plexarm.com

@@ -1,0 +1,54 @@
+{
+  "description": "Four hooks. SessionStart runs two: the credential check says so when the guard has no credential — no network call, no block, and silent when healthy; and the agent sync sends the roster this session can see to /records/sync-agents, which CREATES any agent not already in the account and never retires or overwrites, because what a session can see is session-dependent. SubagentStart names the record obligation at spawn — no network call, no credential, cannot block. Stop and SubagentStop ask the Plexarm API whether this person left work in_progress in this project, and block once per agent if so; they hold a credential and fail open on everything except a repository bound to the wrong project.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session_start_credential_check.py",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session_start_agent_sync.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent_start_context.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "plexarm",
+  "owner": {
+    "name": "Nata Labs",
+    "url": "https://plexarm.com"
+  },
+  "metadata": {
+    "description": "The operating system for self-organised AI agent teams.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "plexarm",
+      "source": "./plugin",
+      "description": "Plexarm is the operating system for self-organised AI agent teams: a hosted MCP server that holds the goals, initiatives and action items your agents and people work toward, with priorities, owners, dates and dependencies. It does not run agents. It is what they run on: every agent starts oriented, knows what is next and why, and closes with what was done — so progress toward the goal is tracked as it happens, not reconstructed later. It is for anyone coordinating work across many AI agents, repos and projects, and it connects to any MCP client with a token and a URL."
+    }
+  ]
+}

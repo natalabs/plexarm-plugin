@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "plexarm": {
+      "type": "http",
+      "url": "https://api.plexarm.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${PLEXARM_TOKEN}"
+      }
+    }
+  }
+}
