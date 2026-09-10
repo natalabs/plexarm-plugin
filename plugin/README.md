@@ -101,6 +101,13 @@ so it declares none.
 
 ### What it sends, and when — changed in 1.2.0, again in 1.4.0, and again in 1.6.1
 
+> **Version 1.6.2 changed nothing about what is sent, and this line is here because the version
+> before 1.2.0 promised that a change WOULD name its version — so a version that changes nothing has
+> to say so too, or the silence is ambiguous.** It hardens where the credential check keeps its
+> per-session answer on your own disk: the cache file is created readable by you alone, and it holds
+> an account slug and never a token. Same call, same path, same two fields, same condition for
+> making it.
+
 **Versions 1.0.0 and 1.1.0 sent nothing anywhere, and said so here. That is no longer true, and this
 section names the version it changed in because the previous one promised it would.**
 

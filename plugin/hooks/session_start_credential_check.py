@@ -421,10 +421,32 @@ def _cached_identity(state: str | None, token: str):
 
 
 def _remember_identity(state: str | None, token: str, account: str) -> None:
+    """Write ONE account slug, in a file only this user can read.
+
+    ⛔ **THE TOKEN NEVER REACHES THE DISK — NOT AS CONTENT, NOT AS A FILENAME,
+    NOT IN A LOG LINE.** The filename is a truncated hash (see `_cache_path`)
+    and the body is one slug. Caching the token alongside its answer is the
+    obvious shape and it would put a live credential in a world-listable temp
+    directory for the life of the session, to save a comparison this code
+    already does in memory. `gate_217` §9 walks the cache directory after a run
+    and asserts no token string appears anywhere in it, filename or content.
+
+    ⚠️ **0600 IS SET WITH `os.open`, NOT WITH A `chmod` AFTERWARDS.** A create
+    followed by a chmod leaves a window in which the file exists at whatever the
+    umask allowed — short, but real, and on a shared machine the temp directory
+    is exactly where somebody would look. `O_CREAT | O_WRONLY | O_TRUNC` with a
+    mode is one syscall and has no window. The mode argument is masked by the
+    process umask, which can only make it MORE restrictive, never less.
+    """
     if not state:
         return
     try:
-        with open(_cache_path(state, token), "w", encoding="utf-8") as handle:
+        descriptor = os.open(
+            _cache_path(state, token),
+            os.O_CREAT | os.O_WRONLY | os.O_TRUNC,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump({"account": account}, handle)
     except OSError:
         pass
