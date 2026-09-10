@@ -120,6 +120,49 @@ TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
 DISABLE_ENV = "PLEXARM_AGENT_SYNC"
 DISABLE_VALUES = frozenset({"off", "0"})
 
+# ─────────────────────────────────────────────────────────────────────────────
+# THE SWITCHBOARD — is this hook on at all?
+#
+# `switches.json`, beside this file, carries the version's shipped default for
+# every hook in the plugin; `PLEXARM_HOOKS_OFF` and `PLEXARM_HOOKS_ON` are the
+# per-machine override, comma-separated hook names, which a user's
+# `settings.json` `env` block reaches (Claude Code offers no per-hook toggle of
+# its own — only `disableAllHooks`, or removing the plugin). OFF beats ON beats
+# the file beats default-on. A missing, unreadable or malformed file switches
+# NOTHING off — that is the pre-1.6.0 behaviour, and a broken file must not be
+# a silent opt-out.
+#
+# ⚠️ THIS BLOCK IS COPIED VERBATIM INTO EVERY PYTHON HOOK IN THIS DIRECTORY.
+# They cannot import from each other (a hook runs as a bare script on a
+# customer's machine), so gate 57 §15 asserts the three copies are
+# byte-identical rather than trusting anyone to keep them so. Edit one, copy
+# it to the others; do not paraphrase.
+# ─────────────────────────────────────────────────────────────────────────────
+HOOK_NAME = "session_start_agent_sync"
+SWITCHES_FILE = "switches.json"
+SWITCH_ON_ENV = "PLEXARM_HOOKS_ON"
+SWITCH_OFF_ENV = "PLEXARM_HOOKS_OFF"
+
+
+def switched_on(name: str, environ: dict) -> bool:
+    """`False` only when the environment or the shipped file says so."""
+
+    def _names(var: str) -> set:
+        return {p.strip() for p in (environ.get(var) or "").split(",") if p.strip()}
+
+    if name in _names(SWITCH_OFF_ENV):
+        return False
+    if name in _names(SWITCH_ON_ENV):
+        return True
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, SWITCHES_FILE), encoding="utf-8") as handle:
+            entry = json.load(handle)["hooks"][name]
+        return bool(entry["on"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+
+
 #: Connect and read separately, **in the client** — the `timeout` in `hooks.json`
 #: is an outer belt only, because `http.client`'s default is 600 seconds.
 CONNECT_TIMEOUT_SECONDS = 2.0
@@ -387,6 +430,8 @@ def main() -> int:
         payload = {}
 
     if (os.environ.get(DISABLE_ENV) or "").strip().lower() in DISABLE_VALUES:
+        return 0
+    if not switched_on(HOOK_NAME, os.environ):
         return 0
 
     source = payload.get("source")

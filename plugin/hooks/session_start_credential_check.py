@@ -106,6 +106,49 @@ import sys
 TOKEN_ENV = "PLEXARM_TOKEN"
 TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# THE SWITCHBOARD — is this hook on at all?
+#
+# `switches.json`, beside this file, carries the version's shipped default for
+# every hook in the plugin; `PLEXARM_HOOKS_OFF` and `PLEXARM_HOOKS_ON` are the
+# per-machine override, comma-separated hook names, which a user's
+# `settings.json` `env` block reaches (Claude Code offers no per-hook toggle of
+# its own — only `disableAllHooks`, or removing the plugin). OFF beats ON beats
+# the file beats default-on. A missing, unreadable or malformed file switches
+# NOTHING off — that is the pre-1.6.0 behaviour, and a broken file must not be
+# a silent opt-out.
+#
+# ⚠️ THIS BLOCK IS COPIED VERBATIM INTO EVERY PYTHON HOOK IN THIS DIRECTORY.
+# They cannot import from each other (a hook runs as a bare script on a
+# customer's machine), so gate 57 §15 asserts the three copies are
+# byte-identical rather than trusting anyone to keep them so. Edit one, copy
+# it to the others; do not paraphrase.
+# ─────────────────────────────────────────────────────────────────────────────
+HOOK_NAME = "session_start_credential_check"
+SWITCHES_FILE = "switches.json"
+SWITCH_ON_ENV = "PLEXARM_HOOKS_ON"
+SWITCH_OFF_ENV = "PLEXARM_HOOKS_OFF"
+
+
+def switched_on(name: str, environ: dict) -> bool:
+    """`False` only when the environment or the shipped file says so."""
+
+    def _names(var: str) -> set:
+        return {p.strip() for p in (environ.get(var) or "").split(",") if p.strip()}
+
+    if name in _names(SWITCH_OFF_ENV):
+        return False
+    if name in _names(SWITCH_ON_ENV):
+        return True
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, SWITCHES_FILE), encoding="utf-8") as handle:
+            entry = json.load(handle)["hooks"][name]
+        return bool(entry["on"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
+
+
 #: What the model is told when the credential is absent. TWO SENTENCES, and the
 #: second is the one doing the work — an agent that merely knows the guard is
 #: off will not mention it, and the user is the only one who can repair it.
@@ -175,6 +218,9 @@ def main() -> int:
             sys.stdin.read()
         except BaseException:  # noqa: BLE001 - draining stdin must never decide anything
             pass
+
+        if not switched_on(HOOK_NAME, os.environ):
+            return 0
 
         if (
             os.environ.get(TOKEN_ENV) or os.environ.get(TOKEN_ENV_FALLBACK) or ""

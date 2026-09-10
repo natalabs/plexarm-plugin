@@ -156,6 +156,13 @@ from datetime import datetime, timezone
 # COMPILED-IN CONFIGURATION. Not read from the repo. Not read from the
 # environment. See RULE 1 — an env override is a repo-supplied override through
 # `.claude/settings.json`, which is a file inside the repository.
+#
+# ⚠️ THE ONE THING THE ENVIRONMENT MAY DECIDE IS WHETHER THIS HOOK RUNS AT ALL.
+# `PLEXARM_HOOKS_OFF` / `PLEXARM_HOOKS_ON` (see `switched_on` below) can turn
+# the guard off or on and nothing else: a repository that sets them can at
+# most put you in the state you are in without the plugin, and can never
+# change where a token is sent. That asymmetry is why it is allowed under
+# RULE 1 and a host override is not.
 # ─────────────────────────────────────────────────────────────────────────────
 API_HOST = "api.plexarm.com"
 API_PATH = "/records/loose-ends"
@@ -266,6 +273,7 @@ OUTCOMES = frozenset(
         "not-checked:http",
         "not-checked:bad-payload",
         "not-checked:internal-error",
+        "not-checked:switched-off",
     }
 )
 
@@ -276,6 +284,57 @@ OUTCOMES = frozenset(
 #: about (measured 2026-08-08, `2026-08-08_subagent_lifecycle_depth.md`).
 STOP = "Stop"
 SUBAGENT_STOP = "SubagentStop"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE SWITCHBOARD — is this hook on at all?
+#
+# `switches.json`, beside this file, carries the version's shipped default for
+# every hook in the plugin; `PLEXARM_HOOKS_OFF` and `PLEXARM_HOOKS_ON` are the
+# per-machine override, comma-separated hook names, which a user's
+# `settings.json` `env` block reaches (Claude Code offers no per-hook toggle of
+# its own — only `disableAllHooks`, or removing the plugin). OFF beats ON beats
+# the file beats default-on. A missing, unreadable or malformed file switches
+# NOTHING off — that is the pre-1.6.0 behaviour, and a broken file must not be
+# a silent opt-out.
+#
+# ⚠️ THIS BLOCK IS COPIED VERBATIM INTO EVERY PYTHON HOOK IN THIS DIRECTORY.
+# They cannot import from each other (a hook runs as a bare script on a
+# customer's machine), so gate 57 §15 asserts the three copies are
+# byte-identical rather than trusting anyone to keep them so. Edit one, copy
+# it to the others; do not paraphrase.
+#
+# THIS HOOK SHIPS OFF AS OF 1.6.0. Measured in use from 2026-08-08: the block
+# fired mostly on a sibling session's open work, and an agent that read the
+# item it was given closes it without being stopped. The efficacy arm that
+# justified it (0/3 closed without, 3/3 with — `2026-08-08_blocking_hook_live_run.md`)
+# measured a cold agent in a scratch repository with no CLAUDE.md, which is not
+# where the instruction now arrives. The code stays, and `PLEXARM_HOOKS_ON`
+# brings it back on one machine, `switches.json` on all of them.
+# ─────────────────────────────────────────────────────────────────────────────
+HOOK_NAME = "stop_record_guard"
+SWITCHES_FILE = "switches.json"
+SWITCH_ON_ENV = "PLEXARM_HOOKS_ON"
+SWITCH_OFF_ENV = "PLEXARM_HOOKS_OFF"
+
+
+def switched_on(name: str, environ: dict) -> bool:
+    """`False` only when the environment or the shipped file says so."""
+
+    def _names(var: str) -> set:
+        return {p.strip() for p in (environ.get(var) or "").split(",") if p.strip()}
+
+    if name in _names(SWITCH_OFF_ENV):
+        return False
+    if name in _names(SWITCH_ON_ENV):
+        return True
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, SWITCHES_FILE), encoding="utf-8") as handle:
+            entry = json.load(handle)["hooks"][name]
+        return bool(entry["on"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -743,6 +802,13 @@ def decide(payload: dict, environ: dict, now: float) -> tuple[str | None, str, s
     event = payload.get("hook_event_name")
     if event not in (STOP, SUBAGENT_STOP):
         return None, _outcome("not-checked:bad-payload"), f"event={event!r}"
+
+    # Guard 0 — the switchboard. Before the state directory, before the loop
+    # guards, before any read of the repository: a hook that is off does
+    # nothing but write the one line that says so. That line is what keeps
+    # "off" distinguishable from "never ran" (audit H1's shape) in `outcomes.log`.
+    if not switched_on(HOOK_NAME, environ):
+        return None, _outcome("not-checked:switched-off"), HOOK_NAME
 
     session_id = str(payload.get("session_id") or "")
     state = _state_dir(session_id) if session_id else None

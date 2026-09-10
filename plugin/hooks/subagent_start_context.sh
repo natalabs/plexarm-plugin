@@ -55,6 +55,38 @@
 
 set -u
 
+# THE SWITCHBOARD. `switches.json` beside this file says whether this hook is
+# on in this version; `PLEXARM_HOOKS_OFF` / `PLEXARM_HOOKS_ON` (comma-separated
+# hook names, from the environment) override it per machine. Same rules as the
+# Python hooks: OFF beats ON beats the file beats on. The decision is made by
+# python3 because `/bin/sh` cannot read JSON; if python3 is absent, or the file
+# is missing or malformed, the hook stays ON — a broken switch is never a
+# silent opt-out. Nothing here reads the repository or the network.
+SWITCHES="$(dirname "$0")/switches.json"
+if command -v python3 >/dev/null 2>&1; then
+    SWITCH=$(PLEXARM_SWITCHES_FILE="$SWITCHES" python3 - <<'PY' 2>/dev/null
+import json, os
+name = "subagent_start_context"
+def names(var):
+    return {p.strip() for p in (os.environ.get(var) or "").split(",") if p.strip()}
+if name in names("PLEXARM_HOOKS_OFF"):
+    print("off")
+elif name in names("PLEXARM_HOOKS_ON"):
+    print("on")
+else:
+    try:
+        with open(os.environ["PLEXARM_SWITCHES_FILE"], encoding="utf-8") as fh:
+            print("on" if json.load(fh)["hooks"][name]["on"] else "off")
+    except Exception:
+        print("on")
+PY
+    ) || SWITCH=on
+    if [ "$SWITCH" = "off" ]; then
+        cat >/dev/null 2>&1 || true
+        exit 0
+    fi
+fi
+
 # Drain stdin. The hook payload is not read — nothing here depends on it — but
 # leaving it unread means the client writes into a pipe with no reader.
 cat >/dev/null 2>&1 || true

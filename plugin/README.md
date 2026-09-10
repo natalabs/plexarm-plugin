@@ -77,7 +77,7 @@ stay on the version you installed until you update by hand.
 | **The MCP tools** | start automatically when the plugin is enabled — no `claude mcp add`, no config editing, no restart |
 | **The `plexarm` skill** | how the method works: picking work up, recording what you did, filing what you noticed |
 | **The `plexarm-chief-of-staff` agent** | **Vera** — sweeps the record for delays, gaps and unowned work, reports the numbers, fixes what is clerical and routes what is not. Added in 1.5.0; see below |
-| **Four hooks** | one names the record obligation to each subagent at spawn; one checks, at the end, whether you left work open; one tells you when that check is not running; one sends the agent roster this session can see so work can be attributed — see all four below |
+| **Four hooks** | one names the record obligation to each subagent at spawn; one checks, at the end, whether you left work open — **off by default since 1.6.0**, see the switchboard below; one tells you when that check is not running; one sends the agent roster this session can see so work can be attributed — see all four below |
 | **Nothing else** | see below |
 
 ### The agent, added in 1.5.0
@@ -140,7 +140,8 @@ information every hosted tool acquires; it is written here rather than left to b
 **In a repository that has not opted in** (no marker, no `.plexarm`), subagents make **no call at
 all**. The main session still makes one at the end, deliberately, carrying **no project name** — the
 server refuses it and the refusal is what tells us the hook is installed and running rather than
-silently absent. If you would rather it did not, turn the hook off; that is one line, below.
+silently absent. If you would rather it did not, turn the hook off; that is one line, below. **And
+since 1.6.0 none of this runs unless you switch the record guard on** — see the next section.
 
 There is still no telemetry beyond that call, no analytics, no usage reporting, and no background
 process.
@@ -189,6 +190,42 @@ here rather than left to be discovered.
 **If you would rather it did not run, turn that hook off**; it is one line, the same as the others,
 below. Everything else in the plugin works without it.
 
+### As of 1.6.0 — a switchboard, and the record guard is off by default
+
+**Version 1.6.0 changes what the plugin sends by default, and it sends less.** The record guard
+(*Hook 2* below — the one call at the end of every session and every subagent) is now **off unless
+you turn it on**. With it off, the plugin makes **no call at the end of a session at all**: no
+loose-ends check, no heartbeat from an unbound repository. The roster sync at the start of a session
+(*Hook 4*) is unchanged and still on.
+
+**Why.** Measured in use since 2026-08-08: agents that read the item they were given close it without
+being stopped, and the block fired mostly on work a *sibling* session had open — so most firings ended
+with the agent saying "not mine". A check that is nearly always answered that way costs a turn at
+the end of every session and, in one measured case, swallowed a subagent's whole report (its reply
+to the block became its last message). The mechanism still works — a 2026-08-08 measurement had 3 of
+3 blocked agents close their item against 0 of 3 unblocked ones, in a bare scratch repository — so
+the code stays and the default changes.
+
+**How every hook is switched, from 1.6.0.** `hooks/switches.json` names each of the four hook scripts
+with `on: true` or `on: false` — that is the version's default, and it is the file to read to know
+what runs. On one machine, without editing the plugin, two environment variables override it:
+
+```
+PLEXARM_HOOKS_ON=stop_record_guard          # turn the record guard back on here
+PLEXARM_HOOKS_OFF=session_start_agent_sync  # turn any hook off here
+```
+
+Comma-separated hook names, exactly as spelled in `switches.json`. `OFF` beats `ON`, either beats
+the file, and a name the file does not carry is on. Put them in your shell profile, or in the `env`
+block of your `settings.json` — Claude Code passes that to hook processes. **A missing or malformed
+`switches.json` switches nothing off**: a broken switch is never a silent opt-out. Every hook checks
+its own switch before it does anything else, and a hook that is off exits without reading, printing
+or sending anything; the record guard additionally writes `not-checked:switched-off` to its log (see
+*Hook 2*), so "off" and "never ran" stay two different lines.
+
+Claude Code itself has no per-hook switch — only `disableAllHooks`, or disabling the plugin — which
+is why the plugin carries its own. If that changes in the client, this section will say so.
+
 ### Hook 1 of 4 — the spawn notice, in full
 
 `hooks/subagent_start_context.sh`, fired on **`SubagentStart`** — when Claude Code spawns a
@@ -210,12 +247,16 @@ reminder can sit that whoever wrote the dispatch cannot omit.
 **To see it fire**, set `PLEXARM_HOOK_LOG` to a path and it appends one timestamped line per spawn.
 Unset by default — it writes nothing to your disk unless you ask.
 
-**To turn it off** without uninstalling: `/hooks` in Claude Code, or delete `hooks/hooks.json`.
+**To turn it off** without uninstalling: `PLEXARM_HOOKS_OFF=subagent_start_context` in your
+environment, or `on: false` under its name in `hooks/switches.json`.
 
 ### Hook 2 of 4 — the record guard, in full
 
 `hooks/stop_record_guard.py`, fired on **`Stop`** (your session is finishing) and **`SubagentStop`**
-(a subagent is finishing). It asks the Plexarm API one question — *did you take work in this project
+(a subagent is finishing). **Off by default since 1.6.0** — everything in this section describes
+what it does once you switch it on (`PLEXARM_HOOKS_ON=stop_record_guard`, or `on: true` in
+`hooks/switches.json`); until then it fires, reads its switch, logs `not-checked:switched-off`, and
+exits. Switched on, it asks the Plexarm API one question — *did you take work in this project
 and not put it down?* — and, if the answer is yes, gives that agent one more turn with the list and
 the exact call to close it.
 
@@ -266,8 +307,9 @@ retry. A server we cannot reach costs you about two seconds at the end of a sess
 whether the check ran and, if not, why. The same lines are in your temp directory without setting
 anything.
 
-**To turn it off** and keep the rest: `/hooks` in Claude Code, or remove the `Stop` and
-`SubagentStop` entries from `hooks/hooks.json`.
+**To turn it on**: `PLEXARM_HOOKS_ON=stop_record_guard` in your environment, or `on: true` under its
+name in `hooks/switches.json`. **To turn it off again** on a machine where the file says on:
+`PLEXARM_HOOKS_OFF=stop_record_guard`.
 
 
 ### Hook 3 of 4 — the credential check, added in 1.3.0
@@ -332,17 +374,18 @@ what binds the hook to a project. Without it the guard never blocks in that repo
 A plugin runs with your privileges, and Anthropic does not verify what is in a third-party one. That
 cuts both ways, so:
 
-- **Every file in here is meant to be read.** There are twelve counting this one: a manifest, an MCP
+- **Every file in here is meant to be read.** There are thirteen counting this one: a manifest, an MCP
   config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
-  scripts it points at, and a `.gitattributes` that pins every file here to LF line endings so a
+  scripts it points at, the `hooks/switches.json` that says which of them are on, and a `.gitattributes` that pins every file here to LF line endings so a
   Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the hooks' first line
   into a shebang no shell can find. That is the whole plugin. *(This bullet said seven and named two
   hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one and the count was not corrected with
-  them. It said eleven until the `.gitattributes` was added on 2026-09-09.)*
+  them. It said eleven until the `.gitattributes` was added on 2026-09-09, and twelve until
+  `switches.json` arrived in 1.6.0.)*
 - **The hooks are the part to read first**, because they are the only things here that execute.
   The agent and the skill are prose — they instruct Claude and run nothing.
-  `subagent_start_context.sh` is mostly comments — **ten** lines actually execute, and what they do
-  is print a fixed string. `session_start_credential_check.py` reaches nothing; it looks at **two**
+  `subagent_start_context.sh` is mostly comments — about **thirty** lines actually execute, twenty of
+  them the switchboard check, and what the rest do is print a fixed string. `session_start_credential_check.py` reaches nothing; it looks at **two**
   environment variables — `PLEXARM_TOKEN`, then the plugin option — and prints. *(This said "one
   environment variable" until 2026-08-17; the second arrived in 1.4.1.)*
   `stop_record_guard.py` and `session_start_agent_sync.py` are the

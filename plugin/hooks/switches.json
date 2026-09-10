@@ -1,0 +1,25 @@
+{
+  "what_this_is": "The hook switchboard. Every hook script in this directory reads its own entry here before doing anything else, and exits silently when `on` is false. This is the version's shipped default; to change it on one machine without editing the plugin, set PLEXARM_HOOKS_OFF or PLEXARM_HOOKS_ON to a comma-separated list of the names below (a user's settings.json `env` reaches hook processes). OFF beats ON, either beats this file, and a name missing from this file is on. A missing or unreadable file switches nothing off.",
+  "hooks": {
+    "session_start_credential_check": {
+      "on": true,
+      "since": "1.6.0",
+      "why": "Silent when a credential is present; one line when it is not. Costs nothing and reaches nothing."
+    },
+    "session_start_agent_sync": {
+      "on": true,
+      "since": "1.6.0",
+      "why": "Sends the agent roster once per new session so work can be attributed. PLEXARM_AGENT_SYNC=off still works as the older spelling of PLEXARM_HOOKS_OFF=session_start_agent_sync."
+    },
+    "subagent_start_context": {
+      "on": true,
+      "since": "1.6.0",
+      "why": "Two sentences at spawn, no network, no credential. Measured 2026-08-07: cold subagents recorded 6/6 with it and 1/6 without."
+    },
+    "stop_record_guard": {
+      "on": false,
+      "since": "1.6.0",
+      "why": "Off by default. In use since 2026-08-08 the block fired mostly on a sibling session's open work, and agents that read the item they were given close it without being stopped. The code stays; set PLEXARM_HOOKS_ON=stop_record_guard to have every session and subagent checked at its end again."
+    }
+  }
+}
