@@ -200,8 +200,39 @@ API_PATH = "/records/loose-ends"
 #: ✅ MEASURED 2026-08-14, because assuming it would have shipped a second
 #: no-op repair: a `SessionStart` hook DOES inherit the shell environment
 #: (probe via `claude -p --settings`, `PLEXARM_TOKEN` present, length 47).
-TOKEN_ENV = "PLEXARM_TOKEN"
-TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+#: ⛔ SINCE 1.5.2 THE ORDER LIVES IN ONE PLACE — `plexarm_credential.py`, the
+#: sibling module both hooks import. Everything above is why the order is what
+#: it is and stays here, next to the constant a reader looks for.
+#:
+#: ⚠️ **THE IMPORT IS WRAPPED AND THE ORDER IS RETYPED BELOW IT, AND THAT IS NOT
+#: HEDGING.** A sibling import DOES resolve — Python puts the script's own
+#: directory on `sys.path` at position 0, measured by running this file from a
+#: temporary directory with no package anywhere — but this file BLOCKS on a
+#: non-zero exit, and an `ImportError` at module scope escapes before `main()`
+#: and its `except BaseException` ever run. So a missing or unreadable sibling
+#: would turn a broken install into a traceback at the end of every session
+#: rather than into the 1.5.1 behaviour. **It is not a second order**:
+#: `gate_57` asserts the fallback and the module agree, which is the enforceable
+#: form of what the import was supposed to give us.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from plexarm_credential import (  # noqa: E402
+        TOKEN_ENV,
+        TOKEN_ENV_FALLBACK,
+        resolve_token,
+    )
+except BaseException:  # noqa: BLE001 - a blocking hook must not fail on an import
+    TOKEN_ENV = "PLEXARM_TOKEN"
+    TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+
+    def resolve_token(environ):  # type: ignore[misc]
+        value = (environ.get(TOKEN_ENV) or "").strip()
+        if value:
+            return value
+        value = (environ.get(TOKEN_ENV_FALLBACK) or "").strip()
+        if value:
+            return value
+        return None
 
 #: Connect and read, separately, **in the HTTP client** — not in `hooks.json`.
 #: The `timeout` field there is an outer belt only: the client default is 600
@@ -843,14 +874,14 @@ def decide(payload: dict, environ: dict, now: float) -> tuple[str | None, str, s
         # `SubagentStop` it would multiply the unbound population by tree size —
         # nine calls per session in repositories that have not opted in.
         if unbound == "not-checked:unbound" and event == STOP:
-            token = environ.get(TOKEN_ENV) or environ.get(TOKEN_ENV_FALLBACK)
+            token = resolve_token(environ)
             if not token:
                 return None, _outcome("not-checked:no-credential"), ""
             status, _ = ask(token, None)
             return None, _outcome("not-checked:unbound"), f"heartbeat={status}"
         return None, _outcome(unbound), cwd
 
-    token = environ.get(TOKEN_ENV) or environ.get(TOKEN_ENV_FALLBACK)
+    token = resolve_token(environ)
     if not token:
         return None, _outcome("not-checked:no-credential"), ""
 

@@ -77,7 +77,7 @@ stay on the version you installed until you update by hand.
 | **The MCP tools** | start automatically when the plugin is enabled — no `claude mcp add`, no config editing, no restart |
 | **The `plexarm` skill** | how the method works: picking work up, recording what you did, filing what you noticed |
 | **The `plexarm-chief-of-staff` agent** | **Vera** — sweeps the record for delays, gaps and unowned work, reports the numbers, fixes what is clerical and routes what is not. Added in 1.5.0; see below |
-| **Four hooks** | one names the record obligation to each subagent at spawn; one checks, at the end, whether you left work open — **off by default since 1.6.0**, see the switchboard below; one tells you when that check is not running; one sends the agent roster this session can see so work can be attributed — see all four below |
+| **Four hooks** | one names the record obligation to each subagent at spawn; one checks, at the end, whether you left work open — **off by default since 1.6.0**, see the switchboard below; one tells you when that check is not running **and, since 1.6.1, refuses the session if your tools and your hooks are pointed at two different Plexarm accounts**; one sends the agent roster this session can see so work can be attributed — see all four below |
 | **Nothing else** | see below |
 
 ### The agent, added in 1.5.0
@@ -99,7 +99,7 @@ It makes no network calls of its own beyond the MCP tools you are already using.
 agent, its `hooks`, `mcpServers` and `permissionMode` frontmatter would be ignored by Claude Code —
 so it declares none.
 
-### What it sends, and when — changed in 1.2.0, and again in 1.4.0
+### What it sends, and when — changed in 1.2.0, again in 1.4.0, and again in 1.6.1
 
 **Versions 1.0.0 and 1.1.0 sent nothing anywhere, and said so here. That is no longer true, and this
 section names the version it changed in because the previous one promised it would.**
@@ -121,7 +121,7 @@ the plugin out of that failure entirely.
 
 
 
-**As of version 1.4.0 there are TWO kinds of call, not one.** The paragraphs below described a single
+**As of version 1.6.1 there are THREE kinds of call, and one of them almost never fires. Version 1.4.0 made it TWO kinds of call, not one.** The paragraphs below described a single
 call sending a single field; that was true for 1.2.0 and 1.3.x and is no longer true. The second one
 is described after them, under *"And as of 1.4.0, a second call"*.
 
@@ -189,6 +189,54 @@ here rather than left to be discovered.
 
 **If you would rather it did not run, turn that hook off**; it is one line, the same as the others,
 below. Everything else in the plugin works without it.
+
+### And as of 1.6.1, a third call — *which account is this token for?*, at the start of a session
+
+**Version 1.6.1 gave the credential check something to call, and the version before it said this
+section would name the version if that ever changed.** The script is
+`hooks/session_start_credential_check.py`. Until 1.6.0 it made no network call at all and this
+README said so.
+
+**Why it changed.** Two Plexarm credentials on one machine used to resolve through two different
+paths. `claude mcp add … --header "Authorization: Bearer $PLEXARM_TOKEN"` writes the **expanded**
+token into `~/.claude.json` — your shell substitutes the variable before Claude sees it — and a
+project-scoped entry there takes precedence over this plugin's own server for that directory. The
+plugin's hooks, meanwhile, read `PLEXARM_TOKEN` from your environment at every start. If those two
+are tokens for **different accounts**, your MCP tools write to one account while your hooks report on
+the other, in the same session. That happened, and the only thing that caught it was an agent reading
+its own context carefully.
+
+**When it calls, and when it does not.** At the start of a session the hook reads the config files
+Claude Code itself reads — `~/.claude.json` (or `$CLAUDE_CONFIG_DIR/.claude.json`), a project
+`.mcp.json`, and `.claude/settings.json` — for `mcpServers` entries that would talk to Plexarm, and
+compares their tokens with the one the hooks hold. **If every token it can see is the same string, it
+stops there: no call, no output, nothing leaves your machine.** That is what a normal install does on
+every session. Only a token *different* from the hooks' produces a call.
+
+**What it sends, and to whom:** `GET https://api.plexarm.com/records/identity`, carrying one token in
+the `Authorization` header and **no body at all**. One request per distinct token, cached for the
+rest of the session.
+
+**What comes back — two fields, and nothing else:** `person`, your alias, and `account`, your
+account's slug. No identifiers, no projects, no items, no titles.
+
+**What it does with the answer.** If the two tokens belong to the same account, nothing: it is silent.
+If they belong to **different accounts**, it prints one sentence naming both account slugs and the
+file the second entry lives in, and asks Claude to stop rather than record anything. It names the two
+accounts and the file, and nothing about the other account's work.
+
+**Be aware of what this discloses**, on the same terms as the two paragraphs above: when a second
+Plexarm credential is configured on your machine, **your API server learns that both tokens were seen
+together at the start of a session.** It is your own credentials talking to your own accounts, and it
+is written here rather than left to be discovered.
+
+**It fails open on everything except a measured mismatch.** An unreadable config file, a token it
+cannot resolve, a network error, a 401 — every one of those leaves it silent. It never blocks by
+exiting non-zero; a `SessionStart` hook cannot.
+
+**If you would rather it did not run, turn that hook off** — `PLEXARM_HOOKS_OFF=session_start_credential_check`,
+or `hooks/switches.json`, described in the section above. ⚠️ You lose the credential-missing notice
+and the two-account check **together**: they are one script and one switch.
 
 ### As of 1.6.0 — a switchboard, and the record guard is off by default
 
@@ -312,16 +360,18 @@ name in `hooks/switches.json`. **To turn it off again** on a machine where the f
 `PLEXARM_HOOKS_OFF=stop_record_guard`.
 
 
-### Hook 3 of 4 — the credential check, added in 1.3.0
+### Hook 3 of 4 — the credential check, added in 1.3.0, extended in 1.6.1
 
-`hooks/session_start_credential_check.py`, fired on **`SessionStart`**. It looks at one thing —
-whether the plugin has a credential stored — and if it does, it does nothing at all.
+`hooks/session_start_credential_check.py`, fired on **`SessionStart`**. It looks at two things —
+whether the plugin has a credential at all, and whether the credential your MCP *tools* will use
+belongs to the same Plexarm account as the one the *hooks* hold. If a credential is present and
+there is only one of it, this hook does nothing at all.
 
 | | |
 |---|---|
-| **What it sends** | nothing. No network call, no credential leaves the machine, nothing written to disk |
-| **What it reads** | one environment variable, the one the client fills in from your configured token |
-| **Can it block you?** | **No.** `SessionStart` is context-only |
+| **What it sends** | nothing on the ordinary path. **Only when it can see a second, different Plexarm token** does it ask `GET /records/identity` which account each belongs to — one request per distinct token, no body, cached for the session. Documented in full above, under *"And as of 1.6.1, a third call"* |
+| **What it reads** | two environment variables for the credential, and the `mcpServers` entries in the config files Claude Code itself reads. It parses no other part of them and writes nothing to disk except a per-session cache in your temp directory |
+| **Can it block you?** | **It cannot block by failing** — `SessionStart` cannot be blocked by an exit code, and every error path here is silent. On a two-account mismatch it deliberately asks Claude to stop, and says why |
 | **When it runs** | at the start of a session, before your first message |
 | **Worst case** | it prints a line about a credential you have already fixed |
 
@@ -333,6 +383,12 @@ look identical from where you sit. **The credential is kept by Claude Code, not 
 or re-authenticating the client can empty it, and we get no say and no signal. So the guard cannot
 promise to always work. This hook is the smaller promise it can keep: **if it stops working, you find
 out in your next session.**
+
+**The second job, added in 1.6.1, is scar tissue too.** `claude mcp add` writes the **expanded**
+token into `~/.claude.json`, because your shell substitutes the variable before Claude sees it — and
+a project-scoped entry there beats this plugin's own server for that directory. Someone who runs
+that command with a second account's token then has their tools on one account and their hooks on
+the other, in the same session, with nothing saying so. This hook is what says so.
 
 It checks that a credential is *present*, not that it still *works*. A token that exists but has been
 revoked fails differently and shows up in the guard's own log instead.
@@ -374,20 +430,25 @@ what binds the hook to a project. Without it the guard never blocks in that repo
 A plugin runs with your privileges, and Anthropic does not verify what is in a third-party one. That
 cuts both ways, so:
 
-- **Every file in here is meant to be read.** There are thirteen counting this one: a manifest, an MCP
-  config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
-  scripts it points at, the `hooks/switches.json` that says which of them are on, and a `.gitattributes` that pins every file here to LF line endings so a
-  Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the hooks' first line
-  into a shebang no shell can find. That is the whole plugin. *(This bullet said seven and named two
-  hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one and the count was not corrected with
-  them. It said eleven until the `.gitattributes` was added on 2026-09-09, and twelve until
-  `switches.json` arrived in 1.6.0.)*
+- **Every file in here is meant to be read.** There are fourteen counting this one: a manifest, an
+  MCP config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
+  scripts it points at, the `hooks/switches.json` that says which of them are on, **one small module
+  the two credential-holding hooks share**, and a `.gitattributes` that pins every file here to LF
+  line endings so a Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the
+  hooks' first line into a shebang no shell can find. That is the whole plugin. *(This bullet said
+  seven and named two hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one and the count was not
+  corrected with them. It said eleven until the `.gitattributes` was added on 2026-09-09, twelve
+  until `switches.json` arrived in 1.6.0, and thirteen until `hooks/plexarm_credential.py` arrived
+  in 1.6.1.)*
 - **The hooks are the part to read first**, because they are the only things here that execute.
   The agent and the skill are prose — they instruct Claude and run nothing.
   `subagent_start_context.sh` is mostly comments — about **thirty** lines actually execute, twenty of
-  them the switchboard check, and what the rest do is print a fixed string. `session_start_credential_check.py` reaches nothing; it looks at **two**
-  environment variables — `PLEXARM_TOKEN`, then the plugin option — and prints. *(This said "one
-  environment variable" until 2026-08-17; the second arrived in 1.4.1.)*
+  them the switchboard check, and what the rest do is print a fixed string. `session_start_credential_check.py` reads **two**
+  environment variables for the credential — `PLEXARM_TOKEN`, then the plugin option, through the
+  shared `hooks/plexarm_credential.py` — plus the `mcpServers` entries in the config files Claude
+  Code itself reads, and prints. *(This said "one environment variable" until 2026-08-17; the second
+  arrived in 1.4.1. It said the file "reaches nothing" until 1.6.1, when the two-account check gave
+  it a call to make — see the disclosure above for when that call does and does not happen.)*
   `stop_record_guard.py` and `session_start_agent_sync.py` are the
   two that make a network call and hold your token; their headers are written for a reader deciding
   whether to trust them, and the rules they follow — one key in the marker, the alias never reaching

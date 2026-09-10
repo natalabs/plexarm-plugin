@@ -37,9 +37,18 @@ WHY `SessionStart` STDOUT, AND NOT ANY OF THE OBVIOUS ALTERNATIVES
   broken credential stop the user working. That is worse than silence, and it
   contradicts the whole design of `stop_record_guard.py`, where failing open is
   structural.
-- **Not a network call.** There is nothing to call *with* — that is the failure.
-  And `README.md` states exactly what this plugin sends; this file adds nothing
-  to it and must never start.
+- **Not a network call, for the missing-credential notice.** There is nothing
+  to call *with* — that is the failure — so the notice below is still emitted
+  from the environment alone, with no bytes leaving the machine.
+
+  ⛔ **THAT SENTENCE USED TO END *"this file adds nothing to what the plugin
+  sends and must never start"*, AND 1.6.1 MADE IT FALSE.** It is corrected
+  rather than deleted, because a README that quietly stops being true is the
+  defect this plugin's disclosure section exists to prevent. Since 1.6.1 this
+  file makes **at most one `GET https://api.plexarm.com/records/identity` per
+  distinct token it can see**, and **only when it can see more than one** —
+  see the second half of this docstring. `plugin/README.md` discloses it and
+  names 1.6.1; `gate_57` asserts that it does.
 - **`SessionStart` stdout is injected into the model's context** — verified by
   running it, not from documentation: a probe line asking the model to echo a
   token came back echoed. The model then tells the user, which is the only path
@@ -77,34 +86,120 @@ exists but has been revoked produces `not-checked:http 401` in the guard's
 `outcomes.log` — a different failure with a different signature, not this one.
 Verifying validity here would mean a network call at the start of every session,
 which is a much larger promise than this file is allowed to make.
+
+════════════════════════════════════════════════════════════════════════════════
+1.6.1 — THE SECOND JOB: TWO CREDENTIALS ON ONE MACHINE, AND A REFUSAL
+════════════════════════════════════════════════════════════════════════════════
+`itm-…87b10e`, from `fnd-…34b6eb` measured 2026-09-09 on launch day.
+
+A second Plexarm account was created and `/connect`'s Claude Code snippet was
+run from a project directory: `claude mcp add … --header "Authorization: Bearer
+<the new token>"`. **The shell expands the variable before Claude sees it**, so
+that wrote a project-scoped `plexarm` server carrying a LITERAL token into
+`~/.claude.json`. The same machine exports `PLEXARM_TOKEN` from a keychain item,
+which is what the plugin's `.mcp.json` and all four hooks read.
+
+In the next session in that directory: `plexarm_whoami` answered as the **second**
+account with no projects and an empty board, while `stop_record_guard.py` —
+reading the environment — listed three `in_progress` items belonging to the
+**first** account and told the agent they had been *"moved by this USER"*. The
+agent declined to touch them and flagged the mismatch, and that is the only
+reason nothing was written to the wrong account.
+
+**It is not a breach.** Both credentials belonged to the same person, on her own
+machine, and each path used the token it was configured with. It is a product
+gap with a security shape: somebody who works for two companies from one laptop
+can have the TOOL surface bound to one account and the HOOK surface to the
+other, and the hook then puts the other account's item titles into a session
+that is not authorised for them.
+
+────────────────────────────────────────────────────────────────────────────────
+WHAT THIS FILE DOES ABOUT IT, AND WHAT IT DELIBERATELY DOES NOT
+────────────────────────────────────────────────────────────────────────────────
+1. It resolves the credential the HOOKS hold, through `plexarm_credential.py` —
+   **the one resolver, the one order**, shared with `stop_record_guard.py`.
+2. It reads the config files Claude Code itself reads for `mcpServers` entries
+   and pulls out every `plexarm` server's bearer token, expanding `${VAR}` forms
+   from the same environment the client would.
+3. **If every token it can see is the same string, it stops there and prints
+   nothing. No network call, no context, no bytes.** That is the overwhelmingly
+   common case and it must stay free — see the paragraph above about a notice
+   that fires when things are fine.
+4. Only when it sees a token DIFFERENT from the hooks' does it ask
+   `GET /records/identity` — once per distinct token, cached for the session —
+   for the two slugs behind each.
+5. **If the accounts differ, it refuses the session in one sentence naming both
+   account slugs and the file the second entry lives in.**
+
+⛔ **STEP 4 IS NOT AVOIDABLE BY COMPARING TOKEN STRINGS, AND THE TEMPTATION TO
+TRY IS THE WHOLE REASON THIS PARAGRAPH IS HERE.** Two different tokens can
+belong to the same account — a laptop token and a CI token, or one rotated an
+hour ago — so a string comparison refuses sessions where nothing is wrong. A
+hook that stops somebody working over a false positive is worse than the gap it
+closes, and it is the failure mode this file's own header spends forty lines
+forbidding.
+
+⚠️ **THE REFUSAL NAMES SLUGS AND A FILE PATH AND NOTHING ELSE.** It does not name
+the other account's items, or how many there are. Whether a hook should ever put
+another account's work into a session at all is a live question on the item and
+is NOT answered here; keeping the refusal to two slugs and a path is what makes
+this change safe to ship before that question is settled.
+
+⚠️ **WHETHER `"continue": false` ACTUALLY HALTS A `SessionStart` SESSION IS NOT
+MEASURED FROM HERE, AND SAYING SO IS THE POINT.** The refusal is emitted BOTH as
+`continue`/`stopReason` and as `additionalContext`, because `additionalContext`
+is the channel this file has verified by running it (see above) and the other is
+the one the client documents. If only the second works, the refusal is an
+instruction to a model rather than a stop — which is weaker, and is what the
+sentence tells the model to do. **It is also not delivered under `claude -p` at
+all**, exactly as the missing-credential notice is not: a headless agent with two
+credentials gets no warning, on the same terms and for the same reason.
+
+⚠️ **IT FAILS OPEN ON EVERYTHING EXCEPT A MEASURED MISMATCH.** An unreadable
+config file, a token it cannot expand, a network error, a 401, a 404 from an API
+older than this hook — every one of those leaves silently. The only path to a
+refusal is two successful identity reads that disagree.
 """
 
 from __future__ import annotations
 
+import hashlib
+import http.client
 import json
 import os
+import socket
 import sys
+import tempfile
+from datetime import datetime, timezone
 
-#: The variable Claude Code populates from the plugin's `userConfig.api_token`.
-#: ⚠️ IT IS RETYPED FROM `stop_record_guard.py` RATHER THAN IMPORTED, and that
-#: is not laziness: a hook runs as a bare script under whatever interpreter the
-#: client picks, with no package root, so an import across these two files would
-#: be a runtime failure on a customer's machine rather than a shared constant.
-#: `gate_57` asserts the two spellings are identical, which is the enforceable
-#: form of the thing an import would have given us.
-#:
-#: ⛔ PRIMARY IS `PLEXARM_TOKEN` AS OF 1.4.1 — see the long note in
-#: `stop_record_guard.py` for why, in full. Short form: the plugin option is
-#: stored in `Claude Code-credentials`, a shared blob the client REBUILDS on its
-#: own ~8-hourly OAuth refresh, dropping tenants it does not know about
-#: (upstream `anthropics/claude-code` #62442, closed as not planned).
-#: `PLEXARM_TOKEN` comes from a keychain item Plexarm owns.
-#:
-#: ⚠️ ENVIRONMENT FIRST. The reverse order lets a stale plugin-option value beat
-#: a good environment one and produce a false NO-CREDENTIAL notice — which is
-#: precisely this file's own failure mode and would be invisible.
-TOKEN_ENV = "PLEXARM_TOKEN"
-TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+# ─────────────────────────────────────────────────────────────────────────────
+# THE ONE RESOLVER. See `plexarm_credential.py` for the order and for why the
+# import is wrapped rather than trusted.
+#
+# ⛔ THE FALLBACK IS NOT A SECOND ORDER. It is the same order, retyped, so that a
+# broken install degrades to the 1.5.1 behaviour instead of printing a traceback
+# where a session's context belongs. `gate_57` asserts the two agree — the
+# enforceable form of the thing the import was supposed to give us.
+# ─────────────────────────────────────────────────────────────────────────────
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from plexarm_credential import (  # noqa: E402
+        TOKEN_ENV,
+        TOKEN_ENV_FALLBACK,
+        resolve_token,
+    )
+except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
+    TOKEN_ENV = "PLEXARM_TOKEN"
+    TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+
+    def resolve_token(environ):  # type: ignore[misc]
+        value = (environ.get(TOKEN_ENV) or "").strip()
+        if value:
+            return value
+        value = (environ.get(TOKEN_ENV_FALLBACK) or "").strip()
+        if value:
+            return value
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # THE SWITCHBOARD — is this hook on at all?
@@ -204,39 +299,441 @@ NOTICE = (
 )
 
 
+#: Where the identity read goes. Compiled in, never read from a repository — a
+#: repo can set environment variables for hooks through `.claude/settings.json`,
+#: so a host override would be credential exfiltration through a longer pipe.
+#: `stop_record_guard.py` carries the identical constant for the identical
+#: reason and `gate_57` asserts it there.
+API_HOST = "api.plexarm.com"
+API_PATH = "/records/identity"
+
+#: Two timeouts, separately, because they fail at different times and one number
+#: cannot express both. Deliberately tighter than the guard's: this runs at the
+#: START of a session, where every millisecond is a person waiting.
+CONNECT_TIMEOUT_SECONDS = 2.0
+READ_TIMEOUT_SECONDS = 3.0
+
+#: The server name Claude Code would bind our tools to. A second entry under a
+#: DIFFERENT name pointing at our API is caught too — see `_plexarm_servers`.
+SERVER_NAME = "plexarm"
+
+
+#: What the model is told when the tools and the hooks belong to DIFFERENT
+#: ACCOUNTS. It is built rather than constant because the two slugs and the file
+#: path are the entire content — a refusal that said *"two accounts"* without
+#: naming them leaves the reader to guess which entry to remove, and the whole
+#: measured failure was somebody not knowing there were two.
+#:
+#: ⛔ IT NAMES SLUGS AND A PATH AND NOTHING ELSE. Not the other account's items,
+#: not a count of them. Whether a hook should put another account's work into a
+#: session at all is an open question on `itm-…87b10e` and is not answered here.
+#:
+#: ⚠️ The instruction to the agent is the second half and it is load-bearing on
+#: exactly the terms `NOTICE`'s second sentence is: if `"continue": false` does
+#: not halt a `SessionStart` session, this sentence is the only thing standing
+#: between the divergence and a record written to the wrong account.
+def refusal(mine: str, theirs: str, source: str) -> str:
+    """One sentence, both account slugs, and the file the second entry is in."""
+    return (
+        f"Plexarm REFUSES this session: the `plexarm` MCP server Claude Code "
+        f"will use here is configured in {source} with a token for account "
+        f"`{theirs}`, while this plugin's hooks hold a token for account "
+        f"`{mine}` — two accounts in one session means work you record can land "
+        f"in the wrong one and this session's hooks can show you the other "
+        f"account's open work, so stop now: tell the user this sentence, call "
+        f"no Plexarm tool and record nothing, and have them either delete that "
+        f"`plexarm` entry from {source} or set {TOKEN_ENV} to a token for "
+        f"`{theirs}` before starting again."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Session state — the cache, and the log
+# ─────────────────────────────────────────────────────────────────────────────
+def _state_dir(session_id: str) -> str | None:
+    """`<tmp>/plexarm-hook/<sha256(session_id)>/`, created 0700, or None.
+
+    The same directory `stop_record_guard.py` uses, deliberately: one place to
+    look when somebody asks what the hooks did this session. The session id is
+    **hashed, not used as a path component** — it arrives in a payload, and a
+    value containing `../` would otherwise choose the directory.
+    """
+    try:
+        digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+        path = os.path.join(tempfile.gettempdir(), "plexarm-hook", digest)
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        return path
+    except OSError:
+        return None
+
+
+def _log(state: str | None, outcome: str, note: str = "") -> None:
+    """Append one line. Never raises, and never writes a token.
+
+    ⛔ NOTHING PASSED TO `note` MAY BE A CREDENTIAL OR DERIVED FROM ONE IN A
+    REVERSIBLE WAY. Every caller below passes an outcome word, an account slug
+    or a file path. A truncated hash of a token is fine as a cache FILENAME and
+    is not written here, because a log is the artifact people paste into issues.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    line = f"{stamp} credential-check:{outcome}" + (f" {note}" if note else "") + "\n"
+    targets = []
+    if state:
+        targets.append(os.path.join(state, "outcomes.log"))
+    durable = os.environ.get("PLEXARM_HOOK_LOG")
+    if durable:
+        targets.append(durable)
+    for target in targets:
+        try:
+            with open(target, "a", encoding="utf-8") as handle:
+                handle.write(line)
+        except OSError:
+            pass
+
+
+def _cache_path(state: str, token: str) -> str:
+    """One file per token per session.
+
+    ⚠️ The filename is a truncated SHA-256 of the token and never the token: a
+    temp directory is world-listable on most machines even when its contents are
+    not, so a credential in a FILENAME is a credential in `ls`.
+    """
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(state, f"identity-{digest}.json")
+
+
+def _cached_identity(state: str | None, token: str):
+    """The account this token belongs to, if this session already asked.
+
+    ⚠️ **PER SESSION AND NEVER LONGER.** A token can be revoked and reissued to a
+    different person in the same account; the session is the window in which the
+    fact being compared cannot change underneath the comparison.
+    """
+    if not state:
+        return None
+    try:
+        with open(_cache_path(state, token), encoding="utf-8") as handle:
+            parsed = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    account = parsed.get("account") if isinstance(parsed, dict) else None
+    return account if isinstance(account, str) and account else None
+
+
+def _remember_identity(state: str | None, token: str, account: str) -> None:
+    if not state:
+        return
+    try:
+        with open(_cache_path(state, token), "w", encoding="utf-8") as handle:
+            json.dump({"account": account}, handle)
+    except OSError:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The one network call — `GET /records/identity`
+# ─────────────────────────────────────────────────────────────────────────────
+def ask_identity(token: str) -> tuple[int, str | None]:
+    """`GET /records/identity`. Returns `(status, account_slug_or_None)`.
+
+    Status 0 means no answer at all — no network, a timeout, a body that is not
+    JSON. **No retry**: the failure direction is already safe, because every
+    non-answer leaves this hook silent.
+
+    ⚠️ It sends the token and a body of nothing. The response carries two slugs
+    and no id — `backend/core/whoami/schemas.py::CredentialIdentity` states why
+    it must never carry more, and `plugin/README.md` discloses both fields.
+    """
+    connection = http.client.HTTPSConnection(API_HOST, timeout=CONNECT_TIMEOUT_SECONDS)
+    try:
+        connection.connect()
+        if connection.sock is not None:
+            connection.sock.settimeout(READ_TIMEOUT_SECONDS)
+        connection.request(
+            "GET",
+            API_PATH,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "User-Agent": "plexarm-plugin-hook",
+            },
+        )
+        response = connection.getresponse()
+        raw = response.read(64 * 1024)
+        if response.status != 200:
+            return response.status, None
+        try:
+            parsed = json.loads(raw.decode("utf-8", errors="replace"))
+        except ValueError:
+            return 0, None
+        if not isinstance(parsed, dict):
+            return 0, None
+        account = parsed.get("account")
+        return 200, account if isinstance(account, str) and account else None
+    except (OSError, socket.timeout, http.client.HTTPException):
+        return 0, None
+    finally:
+        try:
+            connection.close()
+        except Exception:  # noqa: BLE001 - closing must never raise upward
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Which server entry Claude Code will actually use
+# ─────────────────────────────────────────────────────────────────────────────
+def _config_sites(cwd: str, environ) -> list[str]:
+    """The files a `plexarm` MCP entry can live in, most global first.
+
+    ⚠️ **THIS LIST IS A CLAIM ABOUT ANOTHER PRODUCT AND WILL GO STALE.** It is
+    Claude Code's own resolution set as measured on 2026-09-09: `~/.claude.json`
+    holds both the user-scope `mcpServers` map and a per-project one under
+    `projects.<absolute cwd>`, a repository may ship `.mcp.json`, and
+    `.claude/settings.json` is read for completeness because the item named it.
+    **Being wrong here fails SILENT and SAFE** — an entry in a file not listed
+    is simply not compared, and this hook stays quiet. It never fails loud.
+
+    `CLAUDE_CONFIG_DIR` is honoured because it is how a clean-config install is
+    tested, and a check that could not run under the harness that proves installs
+    work would be a check nobody could exercise.
+    """
+    sites: list[str] = []
+    config_dir = (environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if config_dir:
+        sites.append(os.path.join(config_dir, ".claude.json"))
+    else:
+        home = os.path.expanduser("~")
+        if home and home != "~":
+            sites.append(os.path.join(home, ".claude.json"))
+    if cwd:
+        sites.append(os.path.join(cwd, ".mcp.json"))
+        sites.append(os.path.join(cwd, ".claude", "settings.json"))
+        sites.append(os.path.join(cwd, ".claude", "settings.local.json"))
+    return sites
+
+
+def _expand(value: str, environ) -> str | None:
+    """`${VAR}`, `$VAR` and `${env:VAR}` resolved from the same environment the
+    client would use. `None` when a reference cannot be resolved.
+
+    ⚠️ An unresolvable reference is **not** treated as a literal. `${PLEXARM_TOKEN}`
+    with the variable unset is a broken config, not a token called
+    `"${PLEXARM_TOKEN}"`, and comparing the literal against the real one would
+    manufacture a mismatch out of somebody's typo.
+    """
+    if "$" not in value:
+        return value
+    out = value
+    for prefix, suffix in (("${env:", "}"), ("${", "}"), ("$", "")):
+        while prefix in out:
+            start = out.index(prefix)
+            after = start + len(prefix)
+            if suffix:
+                end = out.find(suffix, after)
+                if end == -1:
+                    return None
+                name = out[after:end]
+                stop = end + len(suffix)
+            else:
+                name = ""
+                stop = after
+                while stop < len(out) and (out[stop].isalnum() or out[stop] == "_"):
+                    name += out[stop]
+                    stop += 1
+                if not name:
+                    return None
+            resolved = environ.get(name)
+            if not resolved:
+                return None
+            out = out[:start] + resolved + out[stop:]
+    return out
+
+
+def _bearer(server, environ) -> str | None:
+    """The token an `mcpServers` entry would send, or `None`.
+
+    Header lookup is case-insensitive because JSON keys are whatever the person
+    typed and `authorization` is as valid as `Authorization`.
+    """
+    if not isinstance(server, dict):
+        return None
+    headers = server.get("headers")
+    if not isinstance(headers, dict):
+        return None
+    for key, value in headers.items():
+        if not isinstance(key, str) or key.lower() != "authorization":
+            continue
+        if not isinstance(value, str):
+            continue
+        expanded = _expand(value.strip(), environ)
+        if not expanded:
+            return None
+        if expanded.lower().startswith("bearer "):
+            expanded = expanded[len("bearer ") :]
+        expanded = expanded.strip()
+        return expanded or None
+    return None
+
+
+def _plexarm_servers(mapping, environ) -> list[str]:
+    """Every token in this `mcpServers` map that would talk to Plexarm.
+
+    ⚠️ **MATCHED ON THE NAME *AND* ON THE URL.** The name is what collides with
+    the plugin's own server and is the measured case; the URL is what catches the
+    same credential wired in under a different name, which diverges just as
+    badly and which a name-only check would call fine.
+    """
+    found: list[str] = []
+    if not isinstance(mapping, dict):
+        return found
+    for name, server in mapping.items():
+        if not isinstance(server, dict):
+            continue
+        url = server.get("url") or server.get("serverUrl") or server.get("httpUrl") or ""
+        matches = name == SERVER_NAME or (isinstance(url, str) and API_HOST in url)
+        if not matches:
+            continue
+        token = _bearer(server, environ)
+        if token:
+            found.append(token)
+    return found
+
+
+def discover(cwd: str, environ) -> list[tuple[str, str]]:
+    """`(token, file it came from)` for every Plexarm MCP entry this can see.
+
+    Unreadable, unparseable and absent files contribute nothing and say nothing.
+    A hook that complained about somebody's malformed `settings.json` would be
+    reporting on a file it has no business having an opinion about.
+    """
+    found: list[tuple[str, str]] = []
+    for site in _config_sites(cwd, environ):
+        try:
+            with open(site, encoding="utf-8") as handle:
+                parsed = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        for token in _plexarm_servers(parsed.get("mcpServers"), environ):
+            found.append((token, site))
+        # `~/.claude.json` keeps project- and local-scope servers under the
+        # absolute path of the directory they were added in. That is the scope
+        # the measured failure used, and it BEATS the plugin's server for that
+        # directory — which is why a project entry nobody remembers adding can
+        # silently drive every tool call in it.
+        projects = parsed.get("projects")
+        if isinstance(projects, dict) and cwd:
+            for key in (cwd, os.path.realpath(cwd)):
+                entry = projects.get(key)
+                if isinstance(entry, dict):
+                    for token in _plexarm_servers(entry.get("mcpServers"), environ):
+                        found.append((token, site))
+    return found
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The decision
+# ─────────────────────────────────────────────────────────────────────────────
+def decide(payload: dict, environ) -> tuple[str | None, bool]:
+    """`(what to say, whether it is a refusal)`. `(None, False)` is silence.
+
+    Every branch that is not *"two identity reads that disagree"* returns
+    silence, and the outcome is logged so that *"it did not fire"* and *"it could
+    not fire"* are different lines in the same file.
+    """
+    session_id = str(payload.get("session_id") or "")
+    state = _state_dir(session_id) if session_id else None
+    cwd = str(payload.get("cwd") or "")
+
+    token = resolve_token(environ)
+    if not token:
+        _log(state, "no-credential")
+        return NOTICE, False
+
+    others = [(other, site) for other, site in discover(cwd, environ) if other != token]
+    if not others:
+        _log(state, "single-credential")
+        return None, False
+
+    mine = _cached_identity(state, token)
+    if mine is None:
+        status, mine = ask_identity(token)
+        if not mine:
+            _log(state, "unresolved-hook-identity", f"http={status}")
+            return None, False
+        _remember_identity(state, token, mine)
+
+    seen: set[str] = set()
+    for other, site in others:
+        if other in seen:
+            continue
+        seen.add(other)
+        theirs = _cached_identity(state, other)
+        if theirs is None:
+            status, theirs = ask_identity(other)
+            if not theirs:
+                _log(state, "unresolved-server-identity", f"http={status}")
+                continue
+            _remember_identity(state, other, theirs)
+        if theirs != mine:
+            _log(state, "refused", f"{mine} vs {theirs} in {site}")
+            return refusal(mine, theirs, site), True
+    _log(state, "same-account")
+    return None, False
+
+
 def main() -> int:
     """Print at most one object, and **always exit 0**.
 
     Same door as `stop_record_guard.py`: every failure — unreadable stdin, a
     disk error, an exception nobody thought of — leaves through the
     `except BaseException` and takes the silent path. A `SessionStart` hook
-    cannot block a session, but it can waste one by printing garbage where
-    context belongs, and there is exactly one `print` in this program.
+    cannot block a session by exiting non-zero, but it can waste one by printing
+    garbage where context belongs, and there is exactly one `print` here.
+
+    ⚠️ **THE SWITCH IS CHECKED FIRST AND IT TURNS OFF BOTH JOBS.** Switching
+    this hook off gives up the missing-credential notice AND the two-account
+    refusal together — they are one script, and `plugin/README.md` says so
+    rather than leaving somebody to discover it.
     """
     try:
         try:
-            sys.stdin.read()
-        except BaseException:  # noqa: BLE001 - draining stdin must never decide anything
-            pass
+            raw = sys.stdin.read()
+        except BaseException:  # noqa: BLE001 - reading stdin must never decide anything
+            raw = ""
 
         if not switched_on(HOOK_NAME, os.environ):
             return 0
 
-        if (
-            os.environ.get(TOKEN_ENV) or os.environ.get(TOKEN_ENV_FALLBACK) or ""
-        ).strip():
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        message, refused = decide(payload, os.environ)
+        if message is None:
             return 0
 
-        print(
-            json.dumps(
-                {
-                    "hookSpecificOutput": {
-                        "hookEventName": "SessionStart",
-                        "additionalContext": NOTICE,
-                    }
-                }
-            )
-        )
+        emitted = {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": message,
+            }
+        }
+        if refused:
+            # ⚠️ BOTH CHANNELS, AND THE DOCSTRING SAYS WHICH ONE IS MEASURED.
+            # `additionalContext` was verified by running it; whether
+            # `continue: false` halts a `SessionStart` session is documented by
+            # the client and NOT measured from here. Emitting only the
+            # documented one would stake the refusal on an unverified channel;
+            # emitting only the verified one would decline a real stop if the
+            # client honours it.
+            emitted["continue"] = False
+            emitted["stopReason"] = message
+        print(json.dumps(emitted))
         return 0
     except BaseException:  # noqa: BLE001 - see the docstring; this IS the control
         return 0
