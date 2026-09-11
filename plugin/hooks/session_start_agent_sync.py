@@ -97,22 +97,102 @@ import socket
 import sys
 
 # ─────────────────────────────────────────────────────────────────────────────
+# THE CREDENTIAL, THROUGH THE ONE RESOLVER — see `plexarm_credential.py`
+#
+# The import is wrapped and the order retyped below it for the same reason the
+# other two hooks do it: a sibling import DOES resolve (Python puts the
+# script's directory on `sys.path[0]`), but a broken install must not turn
+# into a traceback at the start of every session. `gate_217` §6 asserts every
+# copy reads in the same order.
+# ─────────────────────────────────────────────────────────────────────────────
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from plexarm_credential import (  # noqa: E402
+        STORE_SERVICE,
+        TOKEN_ENV,
+        resolve_token,
+        resolve_token_with_source,
+        store_token,
+    )
+except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
+    import subprocess as _subprocess
+
+    TOKEN_ENV = "PLEXARM_TOKEN"
+    STORE_SERVICE = "plexarm-api-token"
+    STORE_FILE = ".config/plexarm/token"
+    STORE_TIMEOUT_SECONDS = 3.0
+
+    def store_token():  # type: ignore[misc]
+        command = None
+        if os.path.exists("/usr/bin/security"):
+            command = ["/usr/bin/security", "find-generic-password", "-s", STORE_SERVICE, "-w"]
+        elif os.path.exists("/usr/bin/secret-tool"):
+            command = ["/usr/bin/secret-tool", "lookup", "service", STORE_SERVICE]
+        if command is not None:
+            try:
+                completed = _subprocess.run(  # noqa: S603 - absolute path, no shell
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=STORE_TIMEOUT_SECONDS,
+                    env={"PATH": "/usr/bin:/bin"},
+                    stdin=_subprocess.DEVNULL,
+                    check=False,
+                )
+            except (OSError, _subprocess.SubprocessError):
+                completed = None
+            if completed is not None and completed.returncode == 0 and completed.stdout.strip():
+                return completed.stdout.strip()
+        try:
+            import pwd
+
+            home = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError, OSError):
+            return None
+        if not home:
+            return None
+        path = os.path.join(home, STORE_FILE)
+        try:
+            info = os.stat(path)
+            if (info.st_mode & 0o170000) != 0o100000:
+                return None
+            if (info.st_mode & 0o777) not in (0o600, 0o400):
+                return None
+            if info.st_uid != os.getuid():
+                return None
+            with open(path, encoding="utf-8") as handle:
+                return handle.read().strip() or None
+        except OSError:
+            return None
+
+    def resolve_token_with_source(environ):  # type: ignore[misc]
+        value = store_token()
+        if value:
+            return value, "store"
+        value = (environ.get(TOKEN_ENV) or "").strip()
+        if value:
+            return value, "environment"
+        return None, None
+
+    def resolve_token(environ):  # type: ignore[misc]
+        return resolve_token_with_source(environ)[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # COMPILED-IN CONFIGURATION. See RULE 1.
 # ─────────────────────────────────────────────────────────────────────────────
 API_HOST = "api.plexarm.com"
 API_PATH = "/records/sync-agents"
 
-#: The `userConfig` key `api_token`, as Claude Code exposes it to a hook
-#: process. Same constant, same reason, as `stop_record_guard.py`: a shell-form
-#: command that *references* `${user_config.api_token}` does not run at all, and
-#: the exec form would put the secret in the process table.
-#: ⛔ PRIMARY IS `PLEXARM_TOKEN` AS OF 1.4.1 — full reasoning in
-#: `stop_record_guard.py`. The plugin option lives in `Claude Code-credentials`,
-#: which the client rebuilds on its own ~8-hourly OAuth refresh, dropping
-#: tenants it does not know about (`anthropics/claude-code` #62442, closed as
-#: not planned). Environment first; the plugin option is the compatibility tail.
-TOKEN_ENV = "PLEXARM_TOKEN"
-TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+#: ⛔ THIS FILE WAS A FOURTH, UNGATED COPY OF THE CREDENTIAL ORDER AND NOBODY
+#: KNEW. Found 2026-09-11 while making the other three store-first for 1.7.0:
+#: `gate_217` §6 asserts `plexarm_credential.py` and the two retyped fallbacks
+#: agree, and it never looked at this file — which read `PLEXARM_TOKEN` then
+#: `CLAUDE_PLUGIN_OPTION_API_TOKEN`, inline, with no import. Left alone it
+#: would have posted this machine's agent roster under one credential while
+#: every other surface used another, which is `fnd-…34b6eb` again by a route
+#: the fix for `fnd-…34b6eb` did not cover. It now resolves through the shared
+#: module like everything else, and `gate_217` §6 covers it.
 
 #: The one environment variable read, and it can only disable. See RULE 1.
 #: Any value other than the two below leaves the sync ON — an unrecognised
@@ -438,9 +518,7 @@ def main() -> int:
     if isinstance(source, str) and source not in SYNC_ON_SOURCES:
         return 0
 
-    token = (
-        os.environ.get(TOKEN_ENV) or os.environ.get(TOKEN_ENV_FALLBACK) or ""
-    ).strip()
+    token = resolve_token(os.environ)
     if not token:
         # Silent, deliberately. `session_start_credential_check.py` is the file
         # that reports a missing credential, and it runs on this same event —

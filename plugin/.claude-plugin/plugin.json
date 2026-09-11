@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "plexarm",
   "displayName": "Plexarm",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "description": "Plexarm is the operating system for self-organised AI agent teams: a hosted MCP server that holds the goals, initiatives and action items your agents and people work toward, with priorities, owners, dates and dependencies. It does not run agents. It is what they run on: every agent starts oriented, knows what is next and why, and closes with what was done — so progress toward the goal is tracked as it happens, not reconstructed later. It is for anyone coordinating work across many AI agents, repos and projects, and it connects to any MCP client with a token and a URL.",
   "author": {
     "name": "Nata Labs",
@@ -17,14 +17,5 @@
     "project-management",
     "agents"
   ],
-  "userConfig": {
-    "api_token": {
-      "type": "string",
-      "title": "Plexarm API token",
-      "description": "LEGACY FALLBACK — prefer the PLEXARM_TOKEN environment variable, which the MCP server and every hook now read first. Values stored here live in the client's shared 'Claude Code-credentials' keychain item, which is rebuilt on its own ~8-hourly OAuth refresh and loses plugin secrets when it is (anthropics/claude-code#62442, closed as not planned). Create a token at https://plexarm.com/me; it is shown once.",
-      "sensitive": true,
-      "required": false
-    }
-  },
   "mcpServers": "./.mcp.json"
 }

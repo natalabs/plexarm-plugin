@@ -3,9 +3,7 @@
     "plexarm": {
       "type": "http",
       "url": "https://api.plexarm.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${PLEXARM_TOKEN}"
-      }
+      "headersHelper": "\"$CLAUDE_PLUGIN_ROOT/bin/plexarm-headers\""
     }
   }
 }

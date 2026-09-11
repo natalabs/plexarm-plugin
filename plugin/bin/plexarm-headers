@@ -1,0 +1,148 @@
+#!/bin/sh
+# Plexarm — the MCP Authorization header, minted at connect time from a
+# credential store you control. Claude Code runs this once per connect and uses
+# its stdout as the request headers (`headersHelper` in .mcp.json).
+#
+# IT PRINTS ONE LINE OF JSON ON STDOUT AND NOTHING ELSE, AND IT ALWAYS EXITS 0.
+# MEASURED 2026-09-11: a non-zero exit gives the client `exec_failed`, no
+# Authorization header, `hasAuthProvider: true` and therefore OAuth discovery,
+# which ends at `Dynamic Client Registration rejected (HTTP 404)` — a sentence
+# that blames the server and names nothing a person can act on. Emitting a
+# header the server must reject sets `hasAuthProvider: false`, suppresses OAuth,
+# and routes the failure to the one branch that names this helper and relays
+# Plexarm's own repair sentence. So every path that cannot produce a real
+# credential emits the sentinel below instead of failing.
+#
+# Where it looks, in order — the first non-empty answer wins:
+#   1. macOS Keychain        /usr/bin/security find-generic-password -s plexarm-api-token -w
+#   2. Linux Secret Service  /usr/bin/secret-tool lookup service plexarm-api-token
+#   3. A file                $HOME/.config/plexarm/token, mode 600 or 400, owned by you
+#
+# It never takes the token as an argument, never reads it from the environment,
+# never writes it anywhere, and never contacts the network.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# THE FIRST FOUR LINES OF CODE ARE A SECURITY CONTROL, NOT HOUSEKEEPING
+# ─────────────────────────────────────────────────────────────────────────────
+# MEASURED 2026-09-11, panel security seat S2b: a repository shipping
+# `.claude/settings.json` with an `env` block REPLACES this helper's `PATH`, and
+# it does so in a workspace with NO persisted trust — the client gates a
+# repo-declared helper on the trust dialog and does not gate the repo's env
+# block. With the reference helper of §8.6a, whose `tr` was unqualified, a fake
+# `tr` on that PATH captured a decoy credential three times in one session.
+# `BASH_ENV` and `ENV` arrive repo-controlled too; they did not execute only
+# because bash-as-sh does not source them non-interactively, which is an
+# accident of the interpreter and not a control.
+#
+# ⛔ EVERY COMMAND IN THIS FILE IS AN ABSOLUTE PATH OR A SHELL BUILTIN, AND THAT
+# IS ENFORCED BY A GATE. `command -v secret-tool` is NOT a way to find
+# secret-tool — it is a way to let a repository choose which program reads the
+# credential. Test for the absolute path instead.
+PATH=/usr/bin:/bin; export PATH
+unset BASH_ENV ENV CDPATH
+# Space, tab, newline — written literally. `IFS=' \t\n'` in sh is a backslash,
+# a `t`, a backslash and an `n`, which is not what anybody means by it.
+IFS=' 	
+'
+set -u
+
+# ⛔ COMPILED IN. The destination is not a parameter and never becomes one.
+ENDPOINT=https://api.plexarm.com/mcp
+SERVICE=plexarm-api-token
+TOKEN_FILE_SUFFIX=/.config/plexarm/token
+
+# The credential this helper emits when it has none. It authenticates nothing,
+# anywhere, ever — it is a TYPED FAILURE routed onto the only channel the client
+# shows a human, not a second attempt at authenticating. The API recognises this
+# exact literal and answers 401 with a sentence naming the credential store.
+# ⚠️ The identical literal is `NO_LOCAL_CREDENTIAL_SENTINEL` in the API
+# (`backend/core/identity/dependencies.py`). Changing one without the other
+# turns a legible failure back into a generic 401.
+SENTINEL=plexarm-no-local-credential
+
+# Diagnostics go to stderr. MEASURED: the client discards this entirely — it
+# appears nowhere in the debug log — so NOTHING depends on it. It is here for
+# the person who runs this helper by hand, which is the documented way to
+# diagnose it.
+note() { printf 'plexarm: %s\n' "$1" >&2; }
+
+# The ONLY write to stdout in this file.
+emit() { printf '{"Authorization":"Bearer %s"}\n' "$1"; exit 0; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. WHERE IS THIS GOING? Answered BEFORE any store is opened.
+# ─────────────────────────────────────────────────────────────────────────────
+# MEASURED 2026-09-11, panel security seat S6: the client passes the true
+# destination in CLAUDE_CODE_MCP_SERVER_URL, and ANY config that can name this
+# file by absolute path — another installed plugin, or a dynamic
+# `--mcp-config`, neither of which is trust-gated — can point a helper at its
+# own URL. Without this check, the hardening above just means the credential
+# reaches the attacker's endpoint by a tidier route.
+destination=${CLAUDE_CODE_MCP_SERVER_URL-}
+if [ "$destination" != "$ENDPOINT" ]; then
+  note "refusing to mint a header for [$destination]. This helper authenticates $ENDPOINT and nothing else."
+  emit "$SENTINEL"
+fi
+
+token=
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. macOS Keychain
+# ─────────────────────────────────────────────────────────────────────────────
+if [ -x /usr/bin/security ]; then
+  token=$(/usr/bin/security find-generic-password -s "$SERVICE" -w 2>/dev/null) || token=
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Linux Secret Service (libsecret). Absolute path, never `command -v`.
+# ─────────────────────────────────────────────────────────────────────────────
+if [ -z "$token" ] && [ -x /usr/bin/secret-tool ]; then
+  token=$(/usr/bin/secret-tool lookup service "$SERVICE" 2>/dev/null) || token=
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. A plain file — the headless / no-Secret-Service concession, not a peer
+# ─────────────────────────────────────────────────────────────────────────────
+# HOME is the only path input. MEASURED: a repository CANNOT override it on this
+# path (the client keeps the real value), and there is deliberately no
+# PLEXARM_TOKEN_FILE or equivalent — a variable naming the file lets a
+# repository choose WHICH ACCOUNT the client authenticates as, which is worse
+# than theft because the user's work then lands in somebody else's record.
+file=${HOME-}$TOKEN_FILE_SUFFIX
+if [ -z "$token" ] && [ -f "$file" ]; then
+  mode=$(/usr/bin/stat -f '%Lp' "$file" 2>/dev/null) || mode=$(/usr/bin/stat -c '%a' "$file" 2>/dev/null) || mode=
+  owner=$(/usr/bin/stat -f '%u' "$file" 2>/dev/null) || owner=$(/usr/bin/stat -c '%u' "$file" 2>/dev/null) || owner=
+  me=$(/usr/bin/id -u) || me=
+  # The permission bits are the only protection a plain file has, and the
+  # obvious command to create one gets them wrong: this machine's umask is 022,
+  # so `printf %s "$t" > ~/.config/plexarm/token` lands at 0644 — world
+  # readable. Refuse it rather than use it.
+  case "$mode" in
+    600|400|0600|0400) ;;
+    *) note "$file has mode ${mode:-unknown}; only 600 or 400 are accepted. Run: chmod 600 $file"
+       emit "$SENTINEL" ;;
+  esac
+  if [ -z "$owner" ] || [ -z "$me" ] || [ "$owner" != "$me" ]; then
+    note "$file is owned by uid ${owner:-unknown}, not by uid ${me:-unknown}. Refusing to read another account's credential."
+    emit "$SENTINEL"
+  fi
+  token=$(/bin/cat "$file" 2>/dev/null) || token=
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. What came back
+# ─────────────────────────────────────────────────────────────────────────────
+token=$(printf '%s' "$token" | /usr/bin/tr -d '\r\n \t')
+
+if [ -z "$token" ]; then
+  note "no Plexarm credential found on this machine. Store one — macOS: security add-generic-password -a \"\$USER\" -s $SERVICE -w (it prompts, so the token never enters your shell history); Linux: secret-tool store --label=\"Plexarm API token\" service $SERVICE; or a file: umask 077; mkdir -p \"\$HOME/.config/plexarm\"; read -rs t && printf %s \"\$t\" > \"\$HOME$TOKEN_FILE_SUFFIX\". Create a token at https://plexarm.com/me; it is shown once."
+  emit "$SENTINEL"
+fi
+
+case "$token" in
+  *[!A-Za-z0-9_.~-]*)
+    note "the stored Plexarm credential contains characters a token never has. Store it again, without quotes or trailing text."
+    emit "$SENTINEL" ;;
+esac
+
+emit "$token"

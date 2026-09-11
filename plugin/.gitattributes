@@ -13,3 +13,11 @@
 # plugin tree into the public repository and needs no copy at the root.
 * text=auto eol=lf
 hooks/* text eol=lf
+# `bin/*` is named explicitly for the same reason `hooks/*` is, and it is
+# not covered by the blanket line in the way it looks: `text=auto` leaves
+# the text/binary decision to git's heuristic, and `bin/plexarm-headers`
+# has no extension. A CRLF after `#!/bin/sh` is `bad interpreter:
+# /bin/sh^M`, exit 127 — which the MCP client reports as `exec_failed`,
+# and that path ends at an OAuth error naming neither the helper nor
+# Plexarm. One line, and it is the cheapest control in the 1.7.0 change.
+bin/* text eol=lf

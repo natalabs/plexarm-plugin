@@ -108,7 +108,7 @@ measured a plugin hook that **never ran, silently**, while `validate --strict`
 passed and nothing errored — and *"did not block"* is also what a correct pass
 looks like, so an absent hook and a working one are the same experience. One
 `tail` of that file distinguishes them. It is also how the operator verifies
-that `CLAUDE_PLUGIN_OPTION_API_TOKEN` is the right variable name: an install
+that the credential path is the right one: an install
 that never sees a credential logs `not-checked:no-credential` on every line.
 
 Set `PLEXARM_HOOK_LOG` to a path to get the same lines somewhere durable. That
@@ -167,72 +167,126 @@ from datetime import datetime, timezone
 API_HOST = "api.plexarm.com"
 API_PATH = "/records/loose-ends"
 
-#: The `userConfig` key `api_token`, as Claude Code exposes it to a hook
-#: process. Audit H1, measured 2026-08-08 with a byte-identical control: a
-#: shell-form command that *references* `${user_config.api_token}` **does not
-#: run at all**, silently. So the value is taken from the environment and the
-#: command line stays clean. The exec form is also wrong — `args` puts the
-#: secret in the process table, readable by every process on the machine.
+#: ⛔ WHERE THE CREDENTIAL COMES FROM — 1.7.0: THE OS STORE FIRST, THEN
+#: `PLEXARM_TOKEN`, AND NOTHING ELSE.
 #:
-#: ⚠️ THIS NAME IS DOCUMENTED AND UNVERIFIED. It is one constant precisely so
-#: that verifying it is a one-line change, and `not-checked:no-credential` in
-#: `outcomes.log` is what a wrong name looks like.
+#: `CLAUDE_PLUGIN_OPTION_API_TOKEN` was the tail until 1.6.2 and is GONE. The
+#: client keeps `userConfig` values in its shared `Claude Code-credentials`
+#: keychain item, rebuilds that item on its own ~8-hourly OAuth refresh and
+#: drops tenants it did not write (`anthropics/claude-code` #62442, closed as
+#: not planned, therefore permanent) — and measured 2026-09-11 it writes that
+#: item **through `argv`** once the payload passes ~2 KB
+#: (`[WARN] Keychain payload (2285B JSON) exceeds security -i stdin limit;
+#: using argv`). `ps` is world-readable. Audit H1's original finding still
+#: holds and is why no credential ever reaches this hook's command line: a
+#: shell-form command REFERENCING `${user_config.api_token}` does not run at
+#: all, silently, and the exec form puts the secret in the process table.
 #:
-#: ⛔ THE PRIMARY IS `PLEXARM_TOKEN` AS OF 1.4.1, AND THE ORDER IS THE POINT.
-#: `CLAUDE_PLUGIN_OPTION_API_TOKEN` comes from the plugin's `sensitive: true`
-#: `userConfig`, which the client stores in the keychain item
-#: `Claude Code-credentials` — a single JSON blob shared with the client's own
-#: OAuth login and with every MCP OAuth grant. That item is REBUILT when the
-#: client refreshes its own access token, roughly every 8 hours (measured
-#: 2026-08-14: `cdat` and `expiresAt` exactly 8h apart, seconds identical), and
-#: the rebuild drops tenants the writer did not know about. Upstream
-#: `anthropics/claude-code` #62442 is this defect, scoped explicitly to
-#: `sensitive: true`, and it is CLOSED AS NOT PLANNED — so it is permanent.
-#: `PLEXARM_TOKEN` is sourced from a keychain item Plexarm owns and the client
-#: never touches.
+#: ⛔ STORE-FIRST IS LOAD-BEARING AND IT IS NEW IN 1.7.0. Until 1.6.2 the
+#: plugin's `.mcp.json` sent `Bearer ${PLEXARM_TOKEN}`, so the TOOLS and these
+#: HOOKS agreed **by construction** — the header was literally the hooks' first
+#: read, and it was never a comparison. 1.7.0 removes that header; the tools
+#: now read the store only (`bin/plexarm-headers`, and the client scrubs
+#: credential-shaped variables out of a plugin helper's environment, so it
+#: could not read `PLEXARM_TOKEN` if it wanted to). Keep the environment first
+#: here and the machine that motivated the redesign — measured 2026-09-11,
+#: `PLEXARM_TOKEN` sha256[:12] `fc72e2ef306d` against a Keychain item at
+#: `899c601a1fa3`, a GUI editor holding a pre-rotation shell snapshot — runs
+#: its tools on one credential and this guard on another, **with every gate
+#: green**. A guard's success looks exactly like its silence, so nobody would
+#: notice. Full reasoning: `plexarm_credential.py`.
 #:
-#: ⚠️ THE ORDER IS DELIBERATE AND REVERSING IT REINTRODUCES THE BUG QUIETLY.
-#: Reading the plugin option FIRST means a machine holding a STALE value there
-#: and a good one in the environment validates the stale one and reports a
-#: false failure. The environment wins; the plugin option is kept only so an
-#: install that predates 1.4.1 keeps working.
+#: ⚠️ THE ENVIRONMENT IS STILL READ AND THAT IS NOT A FORBIDDEN FALLBACK. It is
+#: a different channel from the tools' one, the SessionStart notice announces
+#: an empty store even when the environment rescued these hooks, and it cannot
+#: mask an MCP failure because the MCP side has no environment path at all.
+#: Without it every containerised and CI install breaks on upgrade.
 #:
-#: ✅ MEASURED 2026-08-14, because assuming it would have shipped a second
-#: no-op repair: a `SessionStart` hook DOES inherit the shell environment
-#: (probe via `claude -p --settings`, `PLEXARM_TOKEN` present, length 47).
-#: ⛔ SINCE 1.5.2 THE ORDER LIVES IN ONE PLACE — `plexarm_credential.py`, the
-#: sibling module both hooks import. Everything above is why the order is what
-#: it is and stays here, next to the constant a reader looks for.
+#: ⚠️ `outcomes.log` is still how an operator tells a wrong credential path
+#: from a working one: an install that never resolves one logs
+#: `not-checked:no-credential` on every line.
+#:
+#: ✅ MEASURED 2026-08-14: a `SessionStart` hook DOES inherit the shell
+#: environment (probe via `claude -p --settings`, `PLEXARM_TOKEN` present).
 #:
 #: ⚠️ **THE IMPORT IS WRAPPED AND THE ORDER IS RETYPED BELOW IT, AND THAT IS NOT
 #: HEDGING.** A sibling import DOES resolve — Python puts the script's own
 #: directory on `sys.path` at position 0, measured by running this file from a
 #: temporary directory with no package anywhere — but this file BLOCKS on a
 #: non-zero exit, and an `ImportError` at module scope escapes before `main()`
-#: and its `except BaseException` ever run. So a missing or unreadable sibling
-#: would turn a broken install into a traceback at the end of every session
-#: rather than into the 1.5.1 behaviour. **It is not a second order**:
-#: `gate_57` asserts the fallback and the module agree, which is the enforceable
-#: form of what the import was supposed to give us.
+#: and its `except BaseException` ever run. **It is not a second order**:
+#: `gate_217` §6 asserts all four copies READ in the same order.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from plexarm_credential import (  # noqa: E402
+        STORE_SERVICE,
         TOKEN_ENV,
-        TOKEN_ENV_FALLBACK,
         resolve_token,
+        resolve_token_with_source,
+        store_token,
     )
 except BaseException:  # noqa: BLE001 - a blocking hook must not fail on an import
-    TOKEN_ENV = "PLEXARM_TOKEN"
-    TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+    import subprocess as _subprocess
 
-    def resolve_token(environ):  # type: ignore[misc]
+    TOKEN_ENV = "PLEXARM_TOKEN"
+    STORE_SERVICE = "plexarm-api-token"
+    STORE_FILE = ".config/plexarm/token"
+    STORE_TIMEOUT_SECONDS = 3.0
+
+    def store_token():  # type: ignore[misc]
+        command = None
+        if os.path.exists("/usr/bin/security"):
+            command = ["/usr/bin/security", "find-generic-password", "-s", STORE_SERVICE, "-w"]
+        elif os.path.exists("/usr/bin/secret-tool"):
+            command = ["/usr/bin/secret-tool", "lookup", "service", STORE_SERVICE]
+        if command is not None:
+            try:
+                completed = _subprocess.run(  # noqa: S603 - absolute path, no shell
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=STORE_TIMEOUT_SECONDS,
+                    env={"PATH": "/usr/bin:/bin"},
+                    stdin=_subprocess.DEVNULL,
+                    check=False,
+                )
+            except (OSError, _subprocess.SubprocessError):
+                completed = None
+            if completed is not None and completed.returncode == 0 and completed.stdout.strip():
+                return completed.stdout.strip()
+        try:
+            import pwd
+
+            home = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError, OSError):
+            return None
+        if not home:
+            return None
+        path = os.path.join(home, STORE_FILE)
+        try:
+            info = os.stat(path)
+            if (info.st_mode & 0o170000) != 0o100000:
+                return None
+            if (info.st_mode & 0o777) not in (0o600, 0o400):
+                return None
+            if info.st_uid != os.getuid():
+                return None
+            with open(path, encoding="utf-8") as handle:
+                return handle.read().strip() or None
+        except OSError:
+            return None
+
+    def resolve_token_with_source(environ):  # type: ignore[misc]
+        value = store_token()
+        if value:
+            return value, "store"
         value = (environ.get(TOKEN_ENV) or "").strip()
         if value:
-            return value
-        value = (environ.get(TOKEN_ENV_FALLBACK) or "").strip()
-        if value:
-            return value
-        return None
+            return value, "environment"
+        return None, None
+
+    def resolve_token(environ):  # type: ignore[misc]
+        return resolve_token_with_source(environ)[0]
 
 #: Connect and read, separately, **in the HTTP client** — not in `hooks.json`.
 #: The `timeout` field there is an outer belt only: the client default is 600

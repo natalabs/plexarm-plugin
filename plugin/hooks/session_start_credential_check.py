@@ -184,22 +184,74 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from plexarm_credential import (  # noqa: E402
+        STORE_SERVICE,
         TOKEN_ENV,
-        TOKEN_ENV_FALLBACK,
         resolve_token,
+        resolve_token_with_source,
+        store_token,
     )
 except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
-    TOKEN_ENV = "PLEXARM_TOKEN"
-    TOKEN_ENV_FALLBACK = "CLAUDE_PLUGIN_OPTION_API_TOKEN"
+    import subprocess as _subprocess
 
-    def resolve_token(environ):  # type: ignore[misc]
+    TOKEN_ENV = "PLEXARM_TOKEN"
+    STORE_SERVICE = "plexarm-api-token"
+    STORE_FILE = ".config/plexarm/token"
+    STORE_TIMEOUT_SECONDS = 3.0
+
+    def store_token():  # type: ignore[misc]
+        command = None
+        if os.path.exists("/usr/bin/security"):
+            command = ["/usr/bin/security", "find-generic-password", "-s", STORE_SERVICE, "-w"]
+        elif os.path.exists("/usr/bin/secret-tool"):
+            command = ["/usr/bin/secret-tool", "lookup", "service", STORE_SERVICE]
+        if command is not None:
+            try:
+                completed = _subprocess.run(  # noqa: S603 - absolute path, no shell
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=STORE_TIMEOUT_SECONDS,
+                    env={"PATH": "/usr/bin:/bin"},
+                    stdin=_subprocess.DEVNULL,
+                    check=False,
+                )
+            except (OSError, _subprocess.SubprocessError):
+                completed = None
+            if completed is not None and completed.returncode == 0 and completed.stdout.strip():
+                return completed.stdout.strip()
+        try:
+            import pwd
+
+            home = pwd.getpwuid(os.getuid()).pw_dir
+        except (ImportError, KeyError, OSError):
+            return None
+        if not home:
+            return None
+        path = os.path.join(home, STORE_FILE)
+        try:
+            info = os.stat(path)
+            if (info.st_mode & 0o170000) != 0o100000:
+                return None
+            if (info.st_mode & 0o777) not in (0o600, 0o400):
+                return None
+            if info.st_uid != os.getuid():
+                return None
+            with open(path, encoding="utf-8") as handle:
+                return handle.read().strip() or None
+        except OSError:
+            return None
+
+    def resolve_token_with_source(environ):  # type: ignore[misc]
+        value = store_token()
+        if value:
+            return value, "store"
         value = (environ.get(TOKEN_ENV) or "").strip()
         if value:
-            return value
-        value = (environ.get(TOKEN_ENV_FALLBACK) or "").strip()
-        if value:
-            return value
-        return None
+            return value, "environment"
+        return None, None
+
+    def resolve_token(environ):  # type: ignore[misc]
+        return resolve_token_with_source(environ)[0]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # THE SWITCHBOARD — is this hook on at all?
@@ -248,54 +300,72 @@ def switched_on(name: str, environ: dict) -> bool:
 #: second is the one doing the work — an agent that merely knows the guard is
 #: off will not mention it, and the user is the only one who can repair it.
 #:
-#: ⚠️ The repair command is spelled out in full. *"Reconfigure the plugin"* is
-#: what the operator was told on 2026-08-10 and the honest reply was *"I don't
-#: know what that means"* — a remedy nobody can execute is not a remedy.
+#: ⚠️ The repair is spelled out in full. *"Reconfigure the plugin"* is what the
+#: operator was told on 2026-08-10 and the honest reply was *"I don't know what
+#: that means"* — a remedy nobody can execute is not a remedy.
 #:
-#: ⛔ THE UNINSTALL IS NOT OPTIONAL, AND OMITTING IT IS WHY THIS NOTICE RAN FOR
-#: FOUR DAYS WITHOUT REPAIRING ANYTHING. Measured 2026-08-14 against the
-#: installed plugin: `claude plugin install plexarm@plexarm --scope user
-#: --config api_token=…` on an ALREADY-INSTALLED plugin prints
-#: `✔ Plugin "plexarm@plexarm" is already installed (scope: user)`, **exits 0**,
-#: and never reaches the step that stores `--config`. Nothing is written; the
-#: keychain item is not touched; `installed_plugins.json` gains no config key.
-#: The command reports success with a tick and does nothing, which is the worst
-#: shape a remedy can have — the agent tells the user it is fixed and the next
-#: session prints this notice again.
+#: ⛔ THE 1.6.x REMEDIES ARE GONE AND MUST NOT COME BACK. They named
+#: `/plugin configure plexarm@plexarm` and
+#: `claude plugin install … --config api_token=…`, which wrote into the
+#: client's shared `Claude Code-credentials` item. 1.7.0 removes
+#: `userConfig.api_token` entirely, so both commands now repair **nothing** —
+#: and the second one measured worse than nothing on 2026-08-14: run against
+#: an already-installed plugin it prints a green `already installed`, exits 0
+#: and silently discards `--config`. A remedy that reports success and changes
+#: nothing is the worst shape a remedy can have. `gate_57` asserts the store
+#: command is named here and that `--config api_token=` is not.
 #:
-#: Uninstall-then-install was then measured end to end: settings.json returns
-#: byte-identical (`enabledPlugins` is dropped by the uninstall and restored by
-#: the install), and a fresh headless session logged `heartbeat=401` against a
-#: deliberately bogus token — a 401 proves the credential RESOLVED and was sent,
-#: where the broken path logs `no-credential`. That contrast is the check.
+#: ⛔ AND THE NOTICE IS DRIVEN OFF THE STORE, NOT OFF WHAT THESE HOOKS
+#: RESOLVED. From 1.7.0 the MCP tools read the credential store and nothing
+#: else, while these hooks fall back to `PLEXARM_TOKEN`. A machine with an
+#: empty store and a good environment variable therefore has WORKING HOOKS and
+#: DEAD TOOLS — and a notice keyed on the hooks' own resolution would stay
+#: silent through exactly that. `STORE_EMPTY` below is that case; `NOTICE` is
+#: the case where there is nothing anywhere.
 #:
-#: ⚠️ It must stay ONE shell line joined by `&&`. Two lines pasted separately is
-#: how a user ends up uninstalled with no credential at all if the second is
-#: mistyped, and `&&` means a failed uninstall stops rather than proceeding.
-#:
-#: ⚠️ `/plugin configure` LEADS, AND IT IS THE CLIENT'S OWN RECOMMENDATION
-#: RATHER THAN OURS. Installing without a value prints: *"1 userConfig option
-#: not yet set (1 required) — run `/plugin configure plexarm@plexarm` in Claude
-#: Code, or pass `--config KEY=VALUE`."* It is one step, it does not touch
-#: `settings.json`, and it cannot leave the user uninstalled if they stop
-#: half-way. **It was not verified from here** — an interactive slash command
-#: cannot be driven from a hook's test — so the shell line, which WAS measured
-#: end to end, is given second rather than dropped. Naming only the unverified
-#: one would repeat this file's own bug in the other direction.
+#: ⚠️ Both name the same three commands in the same order — Keychain, Secret
+#: Service, file — because that is the order `bin/plexarm-headers` reads them
+#: in, and a notice that listed them differently would teach the wrong model.
+#: All three are the interactive-prompt form: a token typed after the prompt
+#: does not enter the shell's history, and `-w` with no value is what makes
+#: `security` prompt.
+_STORE_COMMANDS = (
+    "macOS: `security add-generic-password -a \"$USER\" -s plexarm-api-token -w` "
+    "(press return, then paste the token at the prompt); "
+    "Linux: `secret-tool store --label=\"Plexarm API token\" service plexarm-api-token`; "
+    "or a file: `umask 077; mkdir -p ~/.config/plexarm; read -rs t && printf %s \"$t\" "
+    "> ~/.config/plexarm/token`. Create a token at https://plexarm.com/me; it is shown once."
+)
+
+_RECONNECT = (
+    "Then reconnect: `/mcp` -> plexarm -> Reconnect, or start a new session. "
+    "The helper runs once per connect, so a session already running keeps what "
+    "it started with."
+)
+
 NOTICE = (
-    "Plexarm's record guard is installed but has NO CREDENTIAL, so it is "
-    "checking nothing and cannot tell anyone when work is left open — this "
-    "happens on its own when the client's stored credentials are reset, and it "
-    "has no other symptom. Say so in your first reply, and give BOTH of these "
-    "(they are alternatives; the first is one step): (1) run `/plugin configure "
-    "plexarm@plexarm` in Claude Code and paste a token from "
-    "https://plexarm.com/me; or (2) in a terminal, as ONE line — `claude plugin "
-    "uninstall plexarm@plexarm --scope user && claude plugin install "
-    "plexarm@plexarm --scope user --config api_token=<that token>`. In (2) the "
-    "uninstall is REQUIRED: `claude plugin install` on an already-installed "
-    "plugin prints a green `already installed`, exits 0 and silently discards "
-    "`--config`, so the install on its own reports success and repairs nothing. "
-    "(This checks only that a credential is present, not that it still works.)"
+    "Plexarm has NO CREDENTIAL on this machine: the credential store is empty "
+    "and PLEXARM_TOKEN is not set. So the `plexarm_*` MCP tools will not "
+    "connect this session, and the record guard is checking nothing and cannot "
+    "tell anyone when work is left open — which has no other symptom. Say so "
+    "in your first reply and give the user this: store the token once — "
+    + _STORE_COMMANDS
+    + " "
+    + _RECONNECT
+    + " (This checks only that a credential is present, not that it still works.)"
+)
+
+STORE_EMPTY = (
+    "Plexarm's credential store is EMPTY on this machine. The hooks are "
+    "working — they fell back to PLEXARM_TOKEN — but the `plexarm_*` MCP tools "
+    "read the store and nothing else, so they will NOT connect this session "
+    "and no Plexarm tool call will succeed. Say so in your first reply and "
+    "give the user this: store the same token once — "
+    + _STORE_COMMANDS
+    + " "
+    + _RECONNECT
+    + " Once it is stored you can drop the PLEXARM_TOKEN export; the hooks read "
+    "the store first."
 )
 
 
@@ -571,14 +641,36 @@ def _expand(value: str, environ) -> str | None:
     return out
 
 
+#: The basename of the helper the plugin ships. An entry naming it sends
+#: whatever that helper mints, which is the credential store — see `_bearer`.
+HELPER_NAME = "plexarm-headers"
+
+
 def _bearer(server, environ) -> str | None:
     """The token an `mcpServers` entry would send, or `None`.
 
     Header lookup is case-insensitive because JSON keys are whatever the person
     typed and `authorization` is as valid as `Authorization`.
+
+    ⛔ AN ENTRY WITH A `headersHelper` SENDS WHAT THE HELPER MINTS, AND STATIC
+    HEADERS LOSE. Read out of the client binary 2026-09-11: header assembly is
+    `{...staticHeadersExpanded, ...(helperOutput || {})}` — the helper is
+    spread SECOND, so it wins every key it sets. From 1.7.0 that is how the
+    plugin's own server is configured, and a user who hand-writes the same
+    shape into `~/.claude.json` would otherwise be invisible here: this
+    function read a `headers` dict and nothing else, so it returned `None` and
+    the two-account comparison silently had one account to compare.
+
+    ⚠️ ONLY OUR HELPER IS CLAIMED. Somebody else's helper mints something this
+    hook cannot know, and guessing would manufacture a refusal out of a
+    stranger's config. Unknown stays `None`, which is silence — the same
+    fail-silent-and-safe rule `_config_sites` documents.
     """
     if not isinstance(server, dict):
         return None
+    helper = server.get("headersHelper")
+    if isinstance(helper, str) and HELPER_NAME in helper:
+        return store_token()
     headers = server.get("headers")
     if not isinstance(headers, dict):
         return None
@@ -668,10 +760,17 @@ def decide(payload: dict, environ) -> tuple[str | None, bool]:
     state = _state_dir(session_id) if session_id else None
     cwd = str(payload.get("cwd") or "")
 
-    token = resolve_token(environ)
+    #  ⛔ ONE READ, TWO QUESTIONS. The source is what separates "no credential
+    #  anywhere" from "the hooks are fine and the tools are dead", and reading
+    #  the store a second time to find out would be a second chance to block on
+    #  a keychain unlock prompt in front of a waiting person.
+    token, source = resolve_token_with_source(environ)
     if not token:
         _log(state, "no-credential")
         return NOTICE, False
+    if source != "store":
+        _log(state, "store-empty")
+        return STORE_EMPTY, False
 
     others = [(other, site) for other, site in discover(cwd, environ) if other != token]
     if not others:

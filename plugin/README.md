@@ -24,44 +24,70 @@ explains how the method works, and an agent that keeps the record itself in orde
 
 ### Prerequisites
 
-The MCP tools need nothing beyond Claude Code and a token. **The four hooks are scripts**, and they
-need two things Claude Code itself does not: **Python 3.10 or newer, reachable on your PATH as
-`python3`**, and a **POSIX shell** at `/bin/sh`. macOS and Linux normally have both. On Windows,
-install Python 3 and [Git for Windows](https://gitforwindows.org/) — Git Bash provides the shell.
-Without them the MCP tools still work and only the four hooks are inert: Claude Code reports a hook
-error at the moments they would have run, and that error is the hooks failing to start, not the
-product failing.
+**A POSIX shell at `/bin/sh`**, and **Python 3.10 or newer reachable on your PATH as `python3`**.
+macOS and Linux normally have both; on Windows, install Python 3 and
+[Git for Windows](https://gitforwindows.org/) and run Claude Code from Git Bash.
 
-The plugin is platform-agnostic by design and verified on macOS. Linux and Windows are unverified as
-of 2026-09-07. If you run it there, tell us what happened — <https://plexarm.com>.
+⚠️ **As of 1.7.0 the shell is needed by the MCP tools too, not only by the hooks.** The
+Authorization header is minted at connect time by `bin/plexarm-headers`, a `/bin/sh` script — so
+without a POSIX shell the tools do not connect either. Without Python, the tools still work and the
+four hooks are inert: Claude Code reports a hook error at the moments they would have run, and that
+error is the hooks failing to start, not the product failing.
+
+The plugin is platform-agnostic by design and **verified on macOS**. Linux and Windows are
+unverified. If you run it there, tell us what happened — <https://plexarm.com>.
 
 ### Your token
 
 You need a **Plexarm API token**. Create one at <https://plexarm.com/me> — it is shown once.
 
-**Export it as `PLEXARM_TOKEN`, from wherever you keep secrets** — your own keychain item, a secrets
-manager, your shell profile. That is the path the MCP server and every hook read **first** as of
-1.4.1, and no step here asks you to edit JSON by hand. How you set it depends on where you launch
-Claude Code from:
+**Store it in your operating system's credential store. The plugin reads it from there at the
+moment Claude Code connects, and reads it from nowhere else.** There is no JSON to edit and no
+value to paste into the client. Three stores, in the order the plugin tries them — use the first
+one your machine has:
 
 | | |
 |---|---|
-| **macOS or Linux, from a terminal** | `export PLEXARM_TOKEN=<your token>` in the profile that terminal reads — `~/.zshrc` or `~/.bashrc` — then open a new terminal |
-| **Windows, PowerShell** | `$env:PLEXARM_TOKEN = "<your token>"` in your profile (`notepad $PROFILE`), then open a new window — or `setx PLEXARM_TOKEN <your token>` once, which stores it for every future process of your user account, then restart the terminal |
-| **Windows, CMD** | `setx PLEXARM_TOKEN <your token>`, then open a new window |
-| **A client launched from the Dock or the Start menu** | Apps launched from the Dock or Start menu do not see shell exports. Launch from a terminal, or use the client's secret prompt. On macOS, `launchctl setenv PLEXARM_TOKEN <your token>` reaches Dock-launched apps until you next log out; on Linux, a line `PLEXARM_TOKEN=<your token>` in `~/.config/environment.d/plexarm.conf` reaches the desktop session after you sign in again; on Windows, `setx` already covers it |
+| **macOS — Keychain** (recommended) | `security add-generic-password -a "$USER" -s plexarm-api-token -w`<br>Press return; it prompts for the token, so it never enters your shell history. |
+| **Linux — Secret Service / libsecret** | `secret-tool store --label="Plexarm API token" service plexarm-api-token`<br>It prompts for the token. Needs a running Secret Service, which a headless server usually has not — use the file below there. |
+| **Any POSIX machine — a file** | `umask 077`<br>`mkdir -p ~/.config/plexarm`<br>`read -rs t && printf %s "$t" > ~/.config/plexarm/token`<br>The file must end up mode `600` (or `400`) and owned by you; the plugin **refuses** one that the group or anybody else can read, and says so, rather than using it. The `umask 077` is not decoration: without it the obvious command leaves the file world-readable on a default macOS or Ubuntu account. |
 
-Whichever row you use, the token is stored in plain text somewhere only your user account can read —
-a shell profile, the PowerShell profile, the Windows registry. That is the same posture as any
-other API key on your machine. If you would rather not, use the client's own prompt, described next.
+The Keychain and the Secret Service are the better two: they are addressed by your user account
+through the OS, they are encrypted at rest, and **no environment variable can point the plugin at a
+different one**. The file is the concession for machines that have neither.
 
-> ⚠️ **The token prompt at enable time still works and is now the FALLBACK, not the recommendation.**
-> Values given there land in the client's shared `Claude Code-credentials` keychain item, which is
-> **rebuilt on the client's own ~8-hourly OAuth refresh and drops entries it does not recognise** —
-> so the credential silently reads as empty and the tools vanish. The *why* is under
-> [What it sends, and when](#what-it-sends-and-when--changed-in-120-and-again-in-140). This README
-> said the token "goes into your OS keychain, not into a settings file" until 2026-08-17, which
-> described that shared item as though it were safe storage.
+> **What the Keychain does and does not buy you.** It protects the token at rest and from other
+> user accounts on the machine. It does **not** protect it from code already running as you —
+> anything running as your user can ask `security` for it without a prompt. That is true of every
+> credential on your machine, and we would rather say it than let the word "Keychain" imply
+> otherwise.
+
+**Rotating it.** Store the new token the same way, then reconnect: **`/mcp` → plexarm →
+Reconnect**, or start a new session. The plugin reads the store once per connect, so a session that
+is already running keeps the token it started with. Revoking a token does not log a running session
+out either — the next call fails with a 401 and the same two steps fix it.
+
+**If the store is empty**, the SessionStart hook says so in your first reply of the session, names
+these commands, and tells you to reconnect. You will also see the MCP server reporting that the
+server rejected the Authorization header, carrying Plexarm's own sentence about where to store a
+token. Both are the same condition.
+
+**`PLEXARM_TOKEN` still works for the hooks, and no longer for the tools.** If you set that
+variable under an earlier version, the four hooks still read it — second, after the store — so the
+record guard keeps working. **The MCP tools do not read it at all** and will not connect until a
+token is in the store. See *Version 1.7.0* below for why the tools cannot read it even in
+principle.
+
+**Windows.** The plugin's hooks and its credential helper are POSIX scripts. They need a POSIX
+shell — install [Git for Windows](https://gitforwindows.org/) and run Claude Code from Git Bash —
+and the file store above, at `~/.config/plexarm/token`. The Windows Credential Manager is not read.
+**We have not run any of this on a Windows host.** If you try it, tell us what happened at
+<https://plexarm.com> — that is worth more to us than a guess in this file.
+
+> ⚠️ **A managed enterprise policy can switch `headersHelper` off.** Claude Code ships a policy
+> control for it. If your organisation has set that, this plugin has no credential path at all and
+> the MCP tools will not connect; the server still works in any other MCP client with a token and a
+> URL.
 
 **Then turn on auto-update**, because it is off by default and it is not our choice:
 `/plugin` → **Marketplaces** → **plexarm** → **Enable auto-update**. Anthropic's own marketplaces
@@ -100,6 +126,46 @@ agent, its `hooks`, `mcpServers` and `permissionMode` frontmatter would be ignor
 so it declares none.
 
 ### What it sends, and when — changed in 1.2.0, again in 1.4.0, and again in 1.6.1
+
+> **Version 1.7.0 changed where the credential COMES FROM, again. It did not change what is sent,
+> to whom, or when.** The Authorization header is now minted at connect time by a new executable in
+> the plugin, `bin/plexarm-headers`, which reads your OS credential store. `.mcp.json` no longer
+> carries a `Bearer ${PLEXARM_TOKEN}` header, and the plugin's `api_token` setting is **removed**.
+>
+> *What the new file does, in full:* Claude Code runs it once per connection, from the plugin's own
+> directory, with a 10-second timeout and with credential-shaped environment variables stripped out
+> by the client. It looks in the Keychain, then the Secret Service, then `~/.config/plexarm/token`,
+> and prints **one line of JSON** on standard output — the Authorization header — and nothing else.
+> It **reads no environment variable for the token**, takes nothing on its command line, writes
+> nothing anywhere, and makes no network call of its own. It **refuses to mint a header for any
+> destination but `https://api.plexarm.com/mcp`**, compared against a value compiled into the file,
+> before it opens any store: that is what stops some other configuration on your machine from
+> pointing it at somebody else's URL.
+>
+> *What you see when there is nothing to find:* rather than failing, it sends
+> `Bearer plexarm-no-local-credential` — a value that authenticates nothing, anywhere — and the
+> server answers 401 with a sentence naming the three commands above. It is done this way because
+> the alternative was measured: a helper that exits with an error produces a client-side OAuth
+> failure that mentions neither the credential nor Plexarm.
+>
+> *To diagnose it, run it yourself.* `CLAUDE_CODE_MCP_SERVER_URL=https://api.plexarm.com/mcp
+> ~/.claude/plugins/.../plexarm/bin/plexarm-headers` prints one line and exits. If it prints
+> `Bearer plexarm-no-local-credential`, the store is empty or the file's permissions were refused
+> — the message on standard error says which.
+>
+> *Why the environment variable had to go:* when Claude Code runs a plugin's helper it deletes
+> credential-shaped variables from that helper's environment. Measured 2026-09-11: with
+> `PLEXARM_TOKEN` exported in the parent shell, the helper sees it as absent. The tools therefore
+> **cannot** be handed a token through the environment, even deliberately — so the store is the
+> only path they have. The hooks still read `PLEXARM_TOKEN` second so that existing installs and CI
+> containers keep working.
+>
+> *Why it is worth the change:* a client launched from the Dock, the Start menu or a GUI editor
+> either inherits no shell environment at all or inherits a **stale snapshot** of one. The second
+> is worse, because it looks like it is working: on this account a GUI editor held a token captured
+> the previous evening, a rotation the next morning left the variable untouched, and three
+> consecutive sessions failed with a 401 that read like a revoked token. A value read at connect
+> time cannot go stale that way.
 
 > **Version 1.6.2 changed nothing about what is sent, and this line is here because the version
 > before 1.2.0 promised that a change WOULD name its version — so a version that changes nothing has
@@ -369,15 +435,21 @@ name in `hooks/switches.json`. **To turn it off again** on a machine where the f
 
 ### Hook 3 of 4 — the credential check, added in 1.3.0, extended in 1.6.1
 
-`hooks/session_start_credential_check.py`, fired on **`SessionStart`**. It looks at two things —
-whether the plugin has a credential at all, and whether the credential your MCP *tools* will use
-belongs to the same Plexarm account as the one the *hooks* hold. If a credential is present and
-there is only one of it, this hook does nothing at all.
+`hooks/session_start_credential_check.py`, fired on **`SessionStart`**. It looks at three things —
+whether your credential **store** has a token in it, whether the plugin has a credential at all,
+and whether the credential your MCP *tools* will use belongs to the same Plexarm account as the one
+the *hooks* hold. If the store has a token and there is only one of it, this hook does nothing at
+all.
+
+⚠️ **Since 1.7.0 it speaks up for a case that used to be silent**: an empty store with
+`PLEXARM_TOKEN` still exported. The hooks work — they read that variable second — and the MCP tools
+do not, because they read the store and nothing else. Keying the notice on what the hooks resolved
+would have said nothing at all in exactly that state.
 
 | | |
 |---|---|
 | **What it sends** | nothing on the ordinary path. **Only when it can see a second, different Plexarm token** does it ask `GET /records/identity` which account each belongs to — one request per distinct token, no body, cached for the session. Documented in full above, under *"And as of 1.6.1, a third call"* |
-| **What it reads** | two environment variables for the credential, and the `mcpServers` entries in the config files Claude Code itself reads. It parses no other part of them and writes nothing to disk except a per-session cache in your temp directory |
+| **What it reads** | the credential — your OS credential store first, then the `PLEXARM_TOKEN` environment variable — and the `mcpServers` entries in the config files Claude Code itself reads. Reading the store runs `/usr/bin/security` or `/usr/bin/secret-tool` by absolute path, with no shell and a three-second limit. It parses no other part of those files and writes nothing to disk except a per-session cache in your temp directory |
 | **Can it block you?** | **It cannot block by failing** — `SessionStart` cannot be blocked by an exit code, and every error path here is silent. On a two-account mismatch it deliberately asks Claude to stop, and says why |
 | **When it runs** | at the start of a session, before your first message |
 | **Worst case** | it prints a line about a credential you have already fixed |
@@ -437,38 +509,46 @@ what binds the hook to a project. Without it the guard never blocks in that repo
 A plugin runs with your privileges, and Anthropic does not verify what is in a third-party one. That
 cuts both ways, so:
 
-- **Every file in here is meant to be read.** There are fourteen counting this one: a manifest, an
-  MCP config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
+- **Every file in here is meant to be read.** There are **fifteen** counting this one: a manifest,
+  an MCP config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
   scripts it points at, the `hooks/switches.json` that says which of them are on, **one small module
-  the two credential-holding hooks share**, and a `.gitattributes` that pins every file here to LF
-  line endings so a Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the
-  hooks' first line into a shebang no shell can find. That is the whole plugin. *(This bullet said
-  seven and named two hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one and the count was not
-  corrected with them. It said eleven until the `.gitattributes` was added on 2026-09-09, twelve
-  until `switches.json` arrived in 1.6.0, and thirteen until `hooks/plexarm_credential.py` arrived
-  in 1.6.1.)*
+  the three credential-holding hooks share**, **the credential helper `bin/plexarm-headers` that
+  mints the MCP Authorization header**, and a `.gitattributes` that pins every file here to LF line
+  endings so a Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the
+  hooks' and the helper's first line into a shebang no shell can find. That is the whole plugin.
+  *(This bullet said seven and named two hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one
+  and the count was not corrected with them. It said eleven until the `.gitattributes` was added on
+  2026-09-09, twelve until `switches.json` arrived in 1.6.0, thirteen until
+  `hooks/plexarm_credential.py` arrived in 1.6.1, and fourteen until `bin/plexarm-headers` arrived
+  in 1.7.0. It is corrected late every time, which is why the history is kept here rather than
+  quietly edited away.)*
 - **The hooks are the part to read first**, because they are the only things here that execute.
   The agent and the skill are prose — they instruct Claude and run nothing.
   `subagent_start_context.sh` is mostly comments — about **thirty** lines actually execute, twenty of
-  them the switchboard check, and what the rest do is print a fixed string. `session_start_credential_check.py` reads **two**
-  environment variables for the credential — `PLEXARM_TOKEN`, then the plugin option, through the
-  shared `hooks/plexarm_credential.py` — plus the `mcpServers` entries in the config files Claude
-  Code itself reads, and prints. *(This said "one environment variable" until 2026-08-17; the second
-  arrived in 1.4.1. It said the file "reaches nothing" until 1.6.1, when the two-account check gave
-  it a call to make — see the disclosure above for when that call does and does not happen.)*
+  them the switchboard check, and what the rest do is print a fixed string. `session_start_credential_check.py` reads the credential
+  through the shared `hooks/plexarm_credential.py` — the OS credential store first, then **one**
+  environment variable, `PLEXARM_TOKEN` — plus the `mcpServers` entries in the config files Claude
+  Code itself reads, and prints. Reading the store means it runs `/usr/bin/security` (or
+  `/usr/bin/secret-tool`): by absolute path, with no shell, with a scrubbed environment and a
+  three-second limit. *(This said "one environment variable" until 2026-08-17, then "two" when the
+  plugin option arrived in 1.4.1; 1.7.0 removed that option and made the store first. It said the
+  file "reaches nothing" until 1.6.1, when the two-account check gave it a call to make — see the
+  disclosure above for when that call does and does not happen.)*
   `stop_record_guard.py` and `session_start_agent_sync.py` are the
   two that make a network call and hold your token; their headers are written for a reader deciding
   whether to trust them, and the rules they follow — one key in the marker, the alias never reaching
   a shell, and a failure always meaning *do not block* — are stated at the top before any code.
-- **There is no secret in this repository**, and there never will be. Every file that needs your
-  token names an **unexpanded reference** to it — `${PLEXARM_TOKEN}` in `.mcp.json`, a plain
-  environment read in the hooks — never a value. You supply it: exported as `PLEXARM_TOKEN`, or
-  collected at enable time into the client's own store. It is in no file here and it is never passed
-  on a command line, where every process on the machine could read it.
-  `gate_53_no_credential_in_the_tree.py` is the check on that claim rather than the claim itself, and
-  it reds on any credential-shaped literal in **any** git-tracked file. *(This bullet said the token
-  is "collected at enable time and stored by your operating system", which described only the
-  fallback path after 1.4.1 made the environment variable primary. Corrected 2026-08-17.)*
+- **There is no secret in this repository**, and there never will be. No file here names your
+  token, and after 1.7.0 no file here names an environment variable that holds it either:
+  `.mcp.json` names a **program** to run, `bin/plexarm-headers`, and that program asks your
+  operating system's credential store for the value at the moment Claude Code connects. You supply
+  it once, with a command you run yourself, into a store the plugin only ever reads. It is in no
+  file here and it is never passed on a command line, where every process on the machine could read
+  it. `gate_53_no_credential_in_the_tree.py` is the check on that claim rather than the claim
+  itself, and it reds on any credential-shaped literal in **any** git-tracked file. *(This bullet
+  said the token is "collected at enable time and stored by your operating system", which described
+  only the fallback path after 1.4.1 made the environment variable primary — corrected 2026-08-17;
+  and it named `${PLEXARM_TOKEN}` in `.mcp.json` until 1.7.0 removed that header.)*
 - Check the **Will install** inventory and the **Context cost** in the Discover tab before accepting.
 
 ---
