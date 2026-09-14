@@ -38,7 +38,7 @@ not — it cannot see the plugin entry at all, so it could never have noticed a
 divergence there.
 
 1.7.0 removes that static header. The MCP tools now read **the store and
-nothing else** (`bin/plexarm-headers`; the client scrubs credential-shaped
+nothing else** (`helpers/plexarm-headers`; the client scrubs credential-shaped
 variables out of a plugin helper's environment, so it could not read
 `PLEXARM_TOKEN` even if it wanted to). If the hooks kept reading the
 environment first, then on the machine that motivated this whole redesign —
@@ -81,7 +81,7 @@ THE STORE READ EXECS, AND EVERY EXEC IS ABSOLUTE WITH A SCRUBBED ENVIRONMENT
 ────────────────────────────────────────────────────────────────────────────────
 The hooks' own `PATH` is repo-controlled — measured, same mechanism as above —
 so a `shell=True` or PATH-resolved `security` here is the exfiltration the
-`bin/plexarm-headers` hardening exists to prevent, rewritten in Python. Every
+`helpers/plexarm-headers` hardening exists to prevent, rewritten in Python. Every
 call passes an absolute path, `env={"PATH": …}`, no shell, and a timeout: a
 locked login keychain can block on an unlock prompt, and a hook that hangs in
 front of a person is its own defect.
@@ -96,7 +96,7 @@ package anywhere. What does not follow is that the import is SAFE to depend on.
 scope escapes before its `except BaseException` ever runs, so it imports this
 module inside a `try` and retypes the order as a fallback. **That is not two
 orders**: `gate_217` §6 asserts all four copies — this module, the two retyped
-fallbacks, and `bin/plexarm-headers` — read in the same order, and it asserts
+fallbacks, and `helpers/plexarm-headers` — read in the same order, and it asserts
 the READS rather than the definitions, because asserting the definitions was
 measured blind.
 """
@@ -111,7 +111,7 @@ import subprocess
 #: The variable Plexarm owns. Second, and the only environment name read.
 TOKEN_ENV = "PLEXARM_TOKEN"
 
-#: The Keychain / Secret Service item. `bin/plexarm-headers` carries the same
+#: The Keychain / Secret Service item. `helpers/plexarm-headers` carries the same
 #: string; an item stored for one is found by the other.
 STORE_SERVICE = "plexarm-api-token"
 
@@ -180,7 +180,7 @@ def _keychain_token() -> str | None:
 
     ⚠️ Absolute path, no shell, scrubbed environment, hard timeout. The hooks'
     PATH is repo-controlled; a PATH-resolved `security` here is the measured
-    `bin/` exfiltration rewritten in Python.
+    `helpers/` exfiltration rewritten in Python.
     """
     if os.path.exists("/usr/bin/security"):
         command = ["/usr/bin/security", "find-generic-password", "-s", STORE_SERVICE, "-w"]

@@ -324,7 +324,7 @@ def switched_on(name: str, environ: dict) -> bool:
 #: the case where there is nothing anywhere.
 #:
 #: ⚠️ Both name the same three commands in the same order — Keychain, Secret
-#: Service, file — because that is the order `bin/plexarm-headers` reads them
+#: Service, file — because that is the order `helpers/plexarm-headers` reads them
 #: in, and a notice that listed them differently would teach the wrong model.
 #: All three are the interactive-prompt form: a token typed after the prompt
 #: does not enter the shell's history, and `-w` with no value is what makes

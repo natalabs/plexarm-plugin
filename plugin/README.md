@@ -29,7 +29,7 @@ macOS and Linux normally have both; on Windows, install Python 3 and
 [Git for Windows](https://gitforwindows.org/) and run Claude Code from Git Bash.
 
 ⚠️ **As of 1.7.0 the shell is needed by the MCP tools too, not only by the hooks.** The
-Authorization header is minted at connect time by `bin/plexarm-headers`, a `/bin/sh` script — so
+Authorization header is minted at connect time by `helpers/plexarm-headers`, a `/bin/sh` script — so
 without a POSIX shell the tools do not connect either. Without Python, the tools still work and the
 four hooks are inert: Claude Code reports a hook error at the moments they would have run, and that
 error is the hooks failing to start, not the product failing.
@@ -129,8 +129,13 @@ so it declares none.
 
 > **Version 1.7.0 changed where the credential COMES FROM, again. It did not change what is sent,
 > to whom, or when.** The Authorization header is now minted at connect time by a new executable in
-> the plugin, `bin/plexarm-headers`, which reads your OS credential store. `.mcp.json` no longer
+> the plugin, `helpers/plexarm-headers`, which reads your OS credential store. `.mcp.json` no longer
 > carries a `Bearer ${PLEXARM_TOKEN}` header, and the plugin's `api_token` setting is **removed**.
+>
+> *Version 1.7.1 moved that file from `bin/` to `helpers/` and changed nothing else.* Claude Code
+> puts a plugin's top-level `bin/` on your `PATH`, and the plugin directory hosted on claude.ai
+> refuses any plugin that ships one — the helper is run by path from `.mcp.json` and never needed to
+> be on `PATH`.
 >
 > *What the new file does, in full:* Claude Code runs it once per connection, from the plugin's own
 > directory, with a 10-second timeout and with credential-shaped environment variables stripped out
@@ -149,7 +154,7 @@ so it declares none.
 > failure that mentions neither the credential nor Plexarm.
 >
 > *To diagnose it, run it yourself.* `CLAUDE_CODE_MCP_SERVER_URL=https://api.plexarm.com/mcp
-> ~/.claude/plugins/.../plexarm/bin/plexarm-headers` prints one line and exits. If it prints
+> ~/.claude/plugins/.../plexarm/helpers/plexarm-headers` prints one line and exits. If it prints
 > `Bearer plexarm-no-local-credential`, the store is empty or the file's permissions were refused
 > — the message on standard error says which.
 >
@@ -512,14 +517,14 @@ cuts both ways, so:
 - **Every file in here is meant to be read.** There are **fifteen** counting this one: a manifest,
   an MCP config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
   scripts it points at, the `hooks/switches.json` that says which of them are on, **one small module
-  the three credential-holding hooks share**, **the credential helper `bin/plexarm-headers` that
+  the three credential-holding hooks share**, **the credential helper `helpers/plexarm-headers` that
   mints the MCP Authorization header**, and a `.gitattributes` that pins every file here to LF line
   endings so a Git-for-Windows checkout (`core.autocrlf=true` by default) does not rewrite the
   hooks' and the helper's first line into a shebang no shell can find. That is the whole plugin.
   *(This bullet said seven and named two hook scripts until 1.5.0; 1.3.0 and 1.4.0 each added one
   and the count was not corrected with them. It said eleven until the `.gitattributes` was added on
   2026-09-09, twelve until `switches.json` arrived in 1.6.0, thirteen until
-  `hooks/plexarm_credential.py` arrived in 1.6.1, and fourteen until `bin/plexarm-headers` arrived
+  `hooks/plexarm_credential.py` arrived in 1.6.1, and fourteen until the helper arrived
   in 1.7.0. It is corrected late every time, which is why the history is kept here rather than
   quietly edited away.)*
 - **The hooks are the part to read first**, because they are the only things here that execute.
@@ -540,7 +545,7 @@ cuts both ways, so:
   a shell, and a failure always meaning *do not block* — are stated at the top before any code.
 - **There is no secret in this repository**, and there never will be. No file here names your
   token, and after 1.7.0 no file here names an environment variable that holds it either:
-  `.mcp.json` names a **program** to run, `bin/plexarm-headers`, and that program asks your
+  `.mcp.json` names a **program** to run, `helpers/plexarm-headers`, and that program asks your
   operating system's credential store for the value at the moment Claude Code connects. You supply
   it once, with a command you run yourself, into a store the plugin only ever reads. It is in no
   file here and it is never passed on a command line, where every process on the machine could read

@@ -186,7 +186,7 @@ API_PATH = "/records/loose-ends"
 #: plugin's `.mcp.json` sent `Bearer ${PLEXARM_TOKEN}`, so the TOOLS and these
 #: HOOKS agreed **by construction** — the header was literally the hooks' first
 #: read, and it was never a comparison. 1.7.0 removes that header; the tools
-#: now read the store only (`bin/plexarm-headers`, and the client scrubs
+#: now read the store only (`helpers/plexarm-headers`, and the client scrubs
 #: credential-shaped variables out of a plugin helper's environment, so it
 #: could not read `PLEXARM_TOKEN` if it wanted to). Keep the environment first
 #: here and the machine that motivated the redesign — measured 2026-09-11,

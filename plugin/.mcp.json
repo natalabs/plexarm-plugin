@@ -3,7 +3,7 @@
     "plexarm": {
       "type": "http",
       "url": "https://api.plexarm.com/mcp",
-      "headersHelper": "\"$CLAUDE_PLUGIN_ROOT/bin/plexarm-headers\""
+      "headersHelper": "\"$CLAUDE_PLUGIN_ROOT/helpers/plexarm-headers\""
     }
   }
 }
