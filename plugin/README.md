@@ -5,7 +5,7 @@ the goals, initiatives and action items your agents and people work toward, with
 dates and dependencies. It does not run agents. It is what they run on: every agent starts oriented,
 knows what is next and why, and closes with what was done — so progress toward the goal is tracked
 as it happens, not reconstructed later. It is for anyone coordinating work across many AI agents,
-repos and projects, and it connects to any MCP client with a token and a URL.
+repos and projects, and it connects to any MCP client with a token and a URL. You need a Plexarm account and a token: create a free account at plexarm.com, create a token at plexarm.com/me, and run /plexarm:connect to store it and check the connection.
 
 This plugin is a convenience wrapper. **The product is the Plexarm MCP server**, which works in
 Claude Code, the desktop app, claude.ai on web and mobile, and any other client that speaks MCP.
@@ -13,6 +13,22 @@ What this plugin adds is a one-step install, a proper place to put your credenti
 explains how the method works, and an agent that keeps the record itself in order.
 
 ---
+
+## Start here — four steps, in this order
+
+1. **Install the plugin** (below). Installing connects Claude to the Plexarm server; it does not
+   sign you in.
+2. **Create a free account** at <https://plexarm.com>.
+3. **Create a token** at <https://plexarm.com/me> — it is shown once — and **store it** where the
+   plugin reads it (*Your token*, below). Or ask Claude: **`/plexarm:connect`** walks you through
+   this step and the next one.
+4. **Check it**: reconnect (`/mcp` → plexarm → Reconnect, or a new session) and ask Claude to run
+   `plexarm_whoami`. The answer names you and your account. From then on, every session starts
+   oriented.
+
+If you skip step 2 or 3, nothing breaks and nothing works: the tools answer every call with a
+sentence saying no token was found and where to put one, and your first reply of each session says
+the same. That is by design — an installed plugin with no account is not an error, it is step 2.
 
 ## Install
 
@@ -39,7 +55,10 @@ unverified. If you run it there, tell us what happened — <https://plexarm.com>
 
 ### Your token
 
-You need a **Plexarm API token**. Create one at <https://plexarm.com/me> — it is shown once.
+You need a **Plexarm API token**. If you have no account yet, create a free one at
+<https://plexarm.com> first. Then create the token at <https://plexarm.com/me> — it is shown once.
+`/plexarm:connect` does everything in this section with you, step by step, and never asks you to
+paste the token into the chat.
 
 **Store it in your operating system's credential store. The plugin reads it from there at the
 moment Claude Code connects, and reads it from nowhere else.** There is no JSON to edit and no
@@ -105,6 +124,15 @@ stay on the version you installed until you update by hand.
 | **The `plexarm-chief-of-staff` agent** | **Vera** — sweeps the record for delays, gaps and unowned work, reports the numbers, fixes what is clerical and routes what is not. Added in 1.5.0; see below |
 | **Four hooks** | one names the record obligation to each subagent at spawn; one checks, at the end, whether you left work open — **off by default since 1.6.0**, see the switchboard below; one tells you when that check is not running **and, since 1.6.1, refuses the session if your tools and your hooks are pointed at two different Plexarm accounts**; one sends the agent roster this session can see so work can be attributed — see all four below |
 | **Nothing else** | see below |
+
+### The connect skill, added in 1.8.0
+
+`/plexarm:connect` is the answer to "I installed this — now what?". It checks whether a token is
+already stored, sends you to <https://plexarm.com> for a free account and to
+<https://plexarm.com/me> for a token if not, gives you the store command for your operating system,
+tells you to reconnect, and confirms with `plexarm_whoami`. It never asks for the token in the
+chat: the store command prompts for it in your terminal. Claude also reaches for it on its own
+when the tools report that no token was found.
 
 ### The agent, added in 1.5.0
 
@@ -514,8 +542,8 @@ what binds the hook to a project. Without it the guard never blocks in that repo
 A plugin runs with your privileges, and Anthropic does not verify what is in a third-party one. That
 cuts both ways, so:
 
-- **Every file in here is meant to be read.** There are **fifteen** counting this one: a manifest,
-  an MCP config, a licence, this README, a skill, an agent, a hook registration, the **four** hook
+- **Every file in here is meant to be read.** There are **sixteen** counting this one: a manifest,
+  an MCP config, a licence, this README, two skills (the method, and `connect`), an agent, a hook registration, the **four** hook
   scripts it points at, the `hooks/switches.json` that says which of them are on, **one small module
   the three credential-holding hooks share**, **the credential helper `helpers/plexarm-headers` that
   mints the MCP Authorization header**, and a `.gitattributes` that pins every file here to LF line

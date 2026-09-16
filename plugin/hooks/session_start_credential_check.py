@@ -334,7 +334,9 @@ _STORE_COMMANDS = (
     "(press return, then paste the token at the prompt); "
     "Linux: `secret-tool store --label=\"Plexarm API token\" service plexarm-api-token`; "
     "or a file: `umask 077; mkdir -p ~/.config/plexarm; read -rs t && printf %s \"$t\" "
-    "> ~/.config/plexarm/token`. Create a token at https://plexarm.com/me; it is shown once."
+    "> ~/.config/plexarm/token`. If you have no Plexarm account, create a free one at "
+    "https://plexarm.com first, then create a token at https://plexarm.com/me; it is shown "
+    "once. `/plexarm:connect` walks through all of this."
 )
 
 _RECONNECT = (
