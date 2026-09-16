@@ -5,7 +5,7 @@ the goals, initiatives and action items your agents and people work toward, with
 dates and dependencies. It does not run agents. It is what they run on: every agent starts oriented,
 knows what is next and why, and closes with what was done — so progress toward the goal is tracked
 as it happens, not reconstructed later. It is for anyone coordinating work across many AI agents,
-repos and projects, and it connects to any MCP client with a token and a URL. You need a Plexarm account and a token: create a free account at plexarm.com, create a token at plexarm.com/me, and run /plexarm:connect to store it and check the connection.
+repos and projects, and it connects to any MCP client with a token and a URL. You need a Plexarm account and a token: create a free account at plexarm.com, create a token at plexarm.com/me, and run /plexarm:connect to store it and check the connection. To install in Claude Code: /plugin marketplace add natalabs/plexarm-plugin, then /plugin install plexarm@plexarm.
 
 This plugin is a convenience wrapper. **The product is the Plexarm MCP server**, which works in
 Claude Code, the desktop app, claude.ai on web and mobile, and any other client that speaks MCP.
@@ -251,6 +251,12 @@ since 1.6.0 none of this runs unless you switch the record guard on** — see th
 
 There is still no telemetry beyond that call, no analytics, no usage reporting, and no background
 process.
+
+**As of 1.9.0 the plugin sends nothing new.** What changed is on the server: it counts, per day and
+without any identifier, how many connections arrive without a stored credential — the
+`plexarm-no-local-credential` value described under *Your token* — so we can see whether installs
+are reaching a working connection. Nothing is recorded about you or your machine: no address, no
+account, no per-request row, one integer per day.
 
 **Version 1.3.0 added a third hook and did not change any of the above.** It runs at the *start* of
 a session, makes no network call, holds nothing, and prints one line — only when the plugin has no

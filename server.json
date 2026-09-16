@@ -3,7 +3,7 @@
   "name": "com.plexarm/plexarm",
   "title": "Plexarm",
   "description": "The operating system for self-organised AI agent teams.",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "websiteUrl": "https://plexarm.com",
   "repository": {
     "url": "https://github.com/natalabs/plexarm-plugin",
@@ -25,7 +25,7 @@
   ],
   "_meta": {
     "io.modelcontextprotocol.registry/publisher-provided": {
-      "summary": "Plexarm is the operating system for self-organised AI agent teams: a hosted MCP server that holds the goals, initiatives and action items your agents and people work toward, with priorities, owners, dates and dependencies. It does not run agents. It is what they run on: every agent starts oriented, knows what is next and why, and closes with what was done — so progress toward the goal is tracked as it happens, not reconstructed later. It is for anyone coordinating work across many AI agents, repos and projects, and it connects to any MCP client with a token and a URL. You need a Plexarm account and a token: create a free account at plexarm.com, create a token at plexarm.com/me, and run /plexarm:connect to store it and check the connection."
+      "summary": "Plexarm is the operating system for self-organised AI agent teams: a hosted MCP server that holds the goals, initiatives and action items your agents and people work toward, with priorities, owners, dates and dependencies. It does not run agents. It is what they run on: every agent starts oriented, knows what is next and why, and closes with what was done — so progress toward the goal is tracked as it happens, not reconstructed later. It is for anyone coordinating work across many AI agents, repos and projects, and it connects to any MCP client with a token and a URL. You need a Plexarm account and a token: create a free account at plexarm.com, create a token at plexarm.com/me, and run /plexarm:connect to store it and check the connection. To install in Claude Code: /plugin marketplace add natalabs/plexarm-plugin, then /plugin install plexarm@plexarm."
     }
   }
 }
