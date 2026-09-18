@@ -154,10 +154,22 @@ so the distinction people actually want is **derived**, and this is how you deri
 | Check | How | Action |
 |---|---|---|
 | Open, never processed | as above | **Route or Fix** — either file the work it implies, or say plainly that it is being carried unaddressed |
-| `accepted` with no re-check condition in `notes` | `read` | **Fix — reopen it.** No condition, not accepted. This is the check that keeps the accepted register meaningful |
+| `accepted` with `re_check` empty | the accepted sweep below | **Fix — reopen it** (`status="open"`). No condition, not accepted. This is the check that keeps the accepted register meaningful |
 | `accepted` whose condition has fired | read the condition, check it against today | **Decide** — it is due for re-examination, and that is the whole point of having written it |
 | A "gap" that is really a bug | see the skill's distinction | **Fix** — file it as work. A defect nobody decided to accept is a bug, and filed as a finding it hides in the register of things that are *fine* |
 | Piling up in one component | count by component | **Decide** — a cluster of findings in one place is a signal about that place, not about the findings |
+
+**The accepted sweep**, as a concrete step, because it is the one that keeps the register honest:
+
+1. `find(kind="finding", status="accepted", limit=250)` — check `truncated`; if it is set, the count
+   you report is a floor, and say so.
+2. `read` each hit. Hits do not carry `re_check`; only `read` does. The condition lives in
+   `re_check`, not in `notes` — a sentence in `notes` does not count. The server refuses
+   `accepted` without a `re_check` (since 2026-09-18), so what you find empty predates the rule.
+3. Report the number of accepted findings with an empty `re_check`, over the set you read.
+4. For each one, reopen it — `update(status="open")` — and list it. That is a **Fix**, not a
+   decision: an accepted finding with no condition is not accepted, and moving it back to `open` puts
+   it where somebody will look.
 
 ### Incidents
 
@@ -271,8 +283,8 @@ need padding.
 **Great work:**
 - Every number in the report is traceable to a call, and the scope of the sweep is stated.
 - Nothing sat unowned, unlinked or unnoticed through two consecutive sweeps.
-- The accepted-findings register is genuinely accepted work — every entry carries a condition that
-  would make it worth re-checking.
+- The accepted-findings register is genuinely accepted work — every entry carries a `re_check`, the
+  condition that would make it worth re-checking.
 - Clerical fixes are made and listed, so the human reads decisions rather than chores.
 - The one thing that was actually on fire is at the top, above the tidy tables.
 
@@ -280,7 +292,7 @@ need padding.
 - A partial sweep reported as a census, or a count from a truncated response quoted as a total.
 - Closing an initiative or a goal because its children are done.
 - Re-dating an overdue record so the report looks clean.
-- Leaving an accepted finding with no re-check condition — that is forgetting with extra steps.
+- Leaving an accepted finding with an empty `re_check` — that is forgetting with extra steps.
 - Filing a defect nobody decided to accept as a finding instead of as work.
 - Reporting the sweep in prose and writing nothing to the record. The report reaches one reader once.
 - "Things look broadly on track" — a judgment with no arithmetic under it.

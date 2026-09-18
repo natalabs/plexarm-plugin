@@ -102,6 +102,38 @@ read of the situation. Write both; mark the boundary.
 Your judgement is not noise to be filtered out. It is often the most useful thing in the record —
 you were there, and nobody else was.
 
+### Adding to a record is not the same as rewriting it
+
+Updating a record can **add** to a field, leaving what is already there untouched and letting Plexarm
+write who added it and when — or it can **replace** that field entirely. A record that several people
+touch over weeks wants the first: the reason a decision was taken is usually somewhere in what the
+earlier writer put there, and a replace deletes it with no trace that anything was lost. Reach for the
+replace only when what is there is *wrong*, rather than merely incomplete.
+
+---
+
+## A decision is a piece of work, and the ruling goes inside it
+
+Deciding is work — often the most consequential work in a week — and it finishes the same way anything
+else does: the item is closed, and **the ruling itself is written into it as you close it**, in the
+words it deserves to be quoted in later. That is not optional bookkeeping on this kind of item; a
+decision that closes without saying what was decided is refused.
+
+Write the ruling, not a description of having ruled. *"We decided the export question"* is a record
+that the meeting happened. The next person needs the answer.
+
+**The argument belongs in a document, linked from the item.** The item carries what was decided and by
+whom; the file carries why, and how long it took to get there.
+
+**Work that exists because of a ruling should say so**, by naming the decision as something it depends
+on. That is how a later reader arrives at the reasoning without knowing it exists.
+
+**And a decision is never edited into a different decision.** Changing your mind is itself a decision:
+a new one, which names the earlier ruling it replaces and says **which premise of it stopped being
+true**. The old one stays as it was. It was taken, it was right on what was known then, and the pair
+is worth more than either alone — the reversal is the more valuable half, and it disappears if you
+overwrite the thing it reverses.
+
 ---
 
 ## Is it a bug, an incident, or a gap you're accepting?
@@ -144,6 +176,10 @@ An accepted gap carries the observable thing that would change the answer. *"Fin
 user; re-check when there are two."* *"Fine at this volume; re-check if it doubles."* Now it is a
 decision with an expiry condition attached, and the review is mechanical rather than a matter of
 somebody remembering to worry.
+
+The condition has a field of its own: `re_check`, set when you observe the finding or when you update
+it. It is not a sentence in `notes` — notes are for watch-outs and context, and nothing can query a
+sentence. Accepting a finding with an empty `re_check` is refused, and the refusal names the field.
 
 **No condition, not accepted.**
 
