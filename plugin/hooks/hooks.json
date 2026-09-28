@@ -6,12 +6,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session_start_credential_check.py",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session_start_credential_check.py\"",
             "timeout": 15
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session_start_agent_sync.py",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session_start_agent_sync.py\"",
             "timeout": 10
           }
         ]
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/subagent_start_context.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/subagent_start_context.sh\"",
             "timeout": 5
           }
         ]
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py\"",
             "timeout": 10
           }
         ]
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py\"",
             "timeout": 10
           }
         ]
