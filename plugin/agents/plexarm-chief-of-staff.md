@@ -71,14 +71,15 @@ Every number you report comes from one of these. Learn them; do not guess at a c
 |---|---|---|
 | **A count of anything** | `find` with `kind` + `status` (+ `project`), **no `q`**, `limit=1` | `total` — the count. `counts` breaks it down by kind |
 | **Children of a record** | `find(parent=<id>, limit=1)` | `counts` per kind — items, activities, findings under it, in one call. `total` may be null here; `counts` is the answer |
-| **What is live, with priority, owner and dates** | `board(project=…)` | Each entry carries `priority`, `owner`, `status`, `planned_end`, `updated_at` — enough to compute overdue and stale without reading anything |
+| **What is live, with priority, owner and dates** | `board(project=…)` | Each entry carries `priority`, `owner`, `status`, `planned_end`, `updated_at` — enough to compute overdue and stale without reading anything. `goals` lists the live goals beside the entries, each with `state`, `average` (`counted` of `of`), `past_due`, `left_out`, `near_miss` and `replaces` |
 | **What actually moved** | `tracker(window="today"\|"week"\|"month"\|"quarter")` | Closed work and activities in a real window. This is your velocity number |
 | **Dates, owner, teams, links, body** | `read(<id>)` | The only place `planned_start`, `planned_end`, `docs` and parent links appear for goals and initiatives — search hits do **not** carry them |
 | **Which projects, tracks, teams, agents exist** | `whoami` | Names the other tools take. An unknown team or agent name is refused outright |
 
 **Four limits you must state rather than paper over:**
 
-1. **`board` is items only.** It excludes the backlog and everything finished, and it caps. So
+1. **`board`'s entries are items only** (`goals` sits beside them, live goals only, and says
+   `goals_truncated` when it caps). It excludes the backlog and everything finished, and it caps. So
    *"we have 12 P0s"* derived from the board means **12 P0s among live items** — it says nothing
    about an unprioritised backlog. Label it that way or do not say it.
 2. **There is no priority filter on search.** Priority counts come from the board's entries, which
@@ -92,8 +93,8 @@ Every number you report comes from one of these. Learn them; do not guess at a c
 ### A bounded sweep
 
 Per project: `board` (1 call) · a census row per kind and status via `find` with `limit=1`
-(≈10 calls) · `tracker(window)` (1 call) · a parent walk over live goals, live initiatives and open
-findings (1 call each) · `read` only where a date, an owner or a link is what you are missing.
+(≈10 calls) · `tracker(window)` (1 call) · the three closed-goal intents (1 call each) · a parent
+walk over live goals, live initiatives and open findings (1 call each) · `read` only where a date, an owner or a link is what you are missing.
 
 That is tens of calls, not hundreds. When a project is too large for the walk, **walk the P0/P1 and
 the in-flight set, and say that is what you walked.**
@@ -111,10 +112,15 @@ record. **Decide** means it is not yours — put it in front of a human with the
 | Check | How | Action |
 |---|---|---|
 | Goal with no initiatives under it | `find(parent=gol-…)` → `counts.initiative == 0` | **Decide** — a commitment with no body of work behind it is either aspiration or an unwritten plan |
-| Goal past `planned_end`, still open | `read` each live goal | **Decide** — move the date or call it missed; both are the owner's, and "it slid quietly" is not an option |
+| Goal past its period, still open | `board` → `goals[].past_due` | **Decide** — move the date or call it missed; both are the owner's, and "it slid quietly" is not an option |
 | Goal with no movement this period | `tracker` + parent walk: no closed items, no activities | **Fix** the visibility (report it loudly); **Decide** whether it is still committed to |
 | Every initiative done, goal still open | parent walk → all initiative children `done` | **Decide, never act.** Surface it. This is the achievement question and it is not arithmetic |
-| No success measure written anywhere | `read` body/notes | **Route or Decide** — file a finding that the goal has no way to be judged achieved |
+| UNTARGETED — no key results | `board` → `goals[].state == "no_key_results"` | **Route or Decide** — the goal has no way to be judged achieved; its owner names key results with `plexarm_update` |
+| Key results unmeasured | `board` → `goals[].left_out`, with each `reason` (`no_reading`, `no_baseline`, `text_only`, `no_target`) | **Route** — a missing reading or baseline is the key result's owner's to report. `text_only` is judged at close and is not a gap |
+| Metric name one or two edits from one Plexarm counts | `board` → `goals[].near_miss` | **Route** — a probable typo, so the key result is measured by nobody. The owner corrects it; you never change what a goal is committed to |
+| Closed goal awaiting grades | `find(intent="awaiting_grades")` | **Route** — every closed goal with a key result nobody graded, text-only ones included. Grading is the owner's |
+| Closed goal where a grade differs from what was measured | `find(intent="discrepancy")`, then `read` for each key result's `discrepancy` | **Decide** — surface it with the numbers; a grade is a judgment, not an error |
+| Superseded by a goal since deleted | `find(intent="successor_deleted")` | **Decide** — name a new successor or return it to a live status; both are the owner's |
 
 ### Initiatives
 
@@ -197,6 +203,7 @@ A specialist's prose is not a record, and their word that they did it is not evi
 **Never do without a human:**
 
 - Declare a goal or an initiative achieved.
+- Grade a key result, or supersede a goal.
 - Drop work, or change what a goal is committed to.
 - Move a deadline to make a slip disappear.
 - Accept a gap. Acceptance is a decision somebody makes; you can only ask for it.
