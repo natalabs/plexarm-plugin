@@ -1,0 +1,29 @@
+{
+  "what_this_is": "The hook switchboard. Every hook script in this directory reads its own entry here before doing anything else, and exits silently when `on` is false. This is the version's shipped default; to change it on one machine without editing the plugin, set PLEXARM_HOOKS_OFF or PLEXARM_HOOKS_ON to a comma-separated list of the names below (a user's settings.json `env` reaches hook processes). OFF beats ON, and either beats this file.",
+  "hooks": {
+    "session_start_credential_check": {
+      "on": true,
+      "why": "Silent when a token is stored; one line when it is not. Calls /records/identity only when two different Plexarm tokens are configured."
+    },
+    "session_start_agent_sync": {
+      "on": true,
+      "why": "Sends the agent roster once per new session so work can be attributed. PLEXARM_AGENT_SYNC=off is the older spelling of PLEXARM_HOOKS_OFF=session_start_agent_sync."
+    },
+    "session_start_due": {
+      "on": true,
+      "why": "One GET /records/board?limit=1 per new session; names what the schedule has raised for you, and prints nothing when nothing is due."
+    },
+    "post_tool_use_dispatch": {
+      "on": true,
+      "why": "Installed and asking: after each Agent call it asks Plexarm whether you switched dispatch capture on in your Plexarm profile, and only then sends which agent started which. Your profile switch decides; three fields, never the prompt, and prints nothing."
+    },
+    "subagent_start_context": {
+      "on": true,
+      "why": "Two sentences at spawn; no network call, no credential."
+    },
+    "stop_record_guard": {
+      "on": false,
+      "why": "Off by default. PLEXARM_HOOKS_ON=stop_record_guard checks, at the end of every session and subagent, whether work was left in progress."
+    }
+  }
+}

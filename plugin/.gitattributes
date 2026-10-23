@@ -1,0 +1,26 @@
+# Every file in this plugin is checked out with LF line endings, whatever the
+# cloning machine's core.autocrlf says.
+#
+# WHY: Git for Windows defaults to core.autocrlf=true, which rewrites every text
+# file to CRLF on checkout, and `/plugin marketplace add` clones with git. The
+# hooks are executed by `/bin/sh` and `/usr/bin/env python3`, and a CRLF on their
+# first line makes both fail before any code runs — `bad interpreter: /bin/sh^M`
+# (exit 127) and `env: python3\r: No such file or directory`. Measured on a copy
+# of each hook with `\r` appended to every line, run the way hooks.json runs it.
+#
+# A path attribute beats the config setting, and git honours a .gitattributes
+# inside a subdirectory for the paths beneath it — so this file travels with the
+# plugin tree into the public repository and needs no copy at the root.
+* text=auto eol=lf
+hooks/* text eol=lf
+# `helpers/*` is named explicitly for the same reason `hooks/*` is, and it is
+# not covered by the blanket line in the way it looks: `text=auto` leaves
+# the text/binary decision to git's heuristic, and `helpers/plexarm-headers`
+# has no extension. A CRLF after `#!/bin/sh` is `bad interpreter:
+# /bin/sh^M`, exit 127 — which the MCP client reports as `exec_failed`,
+# and that path ends at an OAuth error naming neither the helper nor
+# Plexarm. One line, and it is the cheapest control in the 1.7.0 change.
+helpers/* text eol=lf
+# The directory listing's icon (`plugin.json` `icon`). Named binary so the
+# blanket `text=auto` line can never guess it into a line-ending rewrite.
+*.png binary

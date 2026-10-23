@@ -1,0 +1,72 @@
+{
+  "description": "Six optional hooks, switched by hooks/switches.json and by PLEXARM_HOOKS_OFF / PLEXARM_HOOKS_ON. SessionStart: the credential check (silent unless no token is stored or two Plexarm accounts are configured), the agent roster sync (POST /records/sync-agents) and the due notice (GET /records/board?limit=1, new sessions only). PostToolUse on Agent, in the background: dispatch capture (POST /records/dispatch: three fields, never the prompt). SubagentStart: a two-sentence recording reminder, no network call. Stop and SubagentStop: the record guard (POST /records/loose-ends), off by default. All calls go to https://api.plexarm.com. See README.md.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session_start_credential_check.py\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session_start_agent_sync.py\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session_start_due.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/post_tool_use_dispatch.py\"",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/subagent_start_context.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/stop_record_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
