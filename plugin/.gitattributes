@@ -1,0 +1,14 @@
+# Every file in this plugin is checked out with LF line endings, whatever the
+# cloning machine's core.autocrlf says.
+#
+# Hooks and helpers must keep LF endings to run.
+#
+# A path attribute beats the config setting, and git honours a .gitattributes
+# inside a subdirectory for the paths beneath it — so this file travels with the
+# plugin tree into the public repository and needs no copy at the root.
+* text=auto eol=lf
+hooks/* text eol=lf
+helpers/* text eol=lf
+# The directory listing's icon (`plugin.json` `icon`). Named binary so the
+# blanket `text=auto` line can never guess it into a line-ending rewrite.
+*.png binary
