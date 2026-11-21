@@ -106,7 +106,7 @@ except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
         path = os.path.join(home, STORE_FILE)
         try:
             info = os.stat(path)
-            if os.stat(os.path.dirname(path)).st_mode & 0o002:
+            if os.stat(os.path.dirname(path)).st_mode & 0o022:
                 return None
             if (info.st_mode & 0o170000) != 0o100000:
                 return None
@@ -466,8 +466,7 @@ def ask_identity(token: str) -> tuple[int, str | None]:
     """`GET /records/identity`. Returns `(status, account_slug_or_None)`.
 
     Status 0 means no answer at all — no network, a timeout, a body that is not
-    JSON. **No retry**: the failure direction is already safe, because every
-    non-answer leaves this hook silent.
+    JSON. **No retry**: every non-answer leaves this hook silent.
 
     It sends the token and no body. The answer carries the account and person
     slugs and nothing else; `plugin/README.md` discloses both fields.

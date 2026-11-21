@@ -96,7 +96,7 @@ except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
         path = os.path.join(home, STORE_FILE)
         try:
             info = os.stat(path)
-            if os.stat(os.path.dirname(path)).st_mode & 0o002:
+            if os.stat(os.path.dirname(path)).st_mode & 0o022:
                 return None
             if (info.st_mode & 0o170000) != 0o100000:
                 return None
@@ -180,9 +180,12 @@ _CALL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 #: else — a control byte, a space — is not sent.
 _AGENT_TYPE = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
 
-#: A busy server answers 503; the call id makes a replay harmless, so a 503 is
-#: retried a bounded number of times with jitter. Nothing else is retried.
-RETRY_STATUS = 503
+#: A busy server answers 503, or 429 when too many requests are in flight. The
+#: call id makes a replay harmless, so either is retried a bounded number of
+#: times with jitter. An answer whose `Retry-After` is longer than the next
+#: delay is not retried: the server named a later time than this hook waits.
+#: Nothing else is retried.
+RETRY_STATUSES = (429, 503)
 RETRY_DELAYS_SECONDS = (0.5, 1.5)
 
 
@@ -239,19 +242,35 @@ def consented(token: str) -> bool:
 
 
 def send(token: str, body: dict) -> int:
-    """`POST /records/dispatch`, retrying only a 503. Returns the last status."""
-    status = post(token, body)
+    """`POST /records/dispatch`, retrying a busy answer. Returns the last status."""
+    status, retry_after = post(token, body)
     for delay in RETRY_DELAYS_SECONDS:
-        if status != RETRY_STATUS:
+        if status not in RETRY_STATUSES:
             break
-        time.sleep(delay * (0.5 + random.random()))
-        status = post(token, body)
+        wait = delay * (0.5 + random.random())
+        if retry_after is not None:
+            if retry_after > delay:
+                break
+            wait = max(wait, retry_after)
+        time.sleep(wait)
+        status, retry_after = post(token, body)
     return status
 
 
-def post(token: str, body: dict) -> int:
-    """One attempt. Returns the status, 0 for no answer."""
-    return exchange("POST", API_PATH, token, body)[0]
+def post(token: str, body: dict) -> tuple[int, float | None]:
+    """One attempt. Returns the status (0 for no answer) and the answer's
+    `Retry-After` in seconds, or None when it sent none."""
+    status, _raw, retry_after = request("POST", API_PATH, token, body)
+    return status, retry_after
+
+
+def retry_after_seconds(value: str | None) -> float | None:
+    """`Retry-After` as seconds. A value that is not whole seconds counts as
+    longer than any delay here, so it is never retried early."""
+    if value is None:
+        return None
+    value = value.strip()
+    return float(value) if value.isdigit() else float("inf")
 
 
 def _addresses(host: str, port: int) -> list:
@@ -310,6 +329,15 @@ def connection() -> http.client.HTTPConnection:
 def exchange(method: str, path: str, token: str, body: dict | None) -> tuple[int, bytes]:
     """One request. Returns the status and at most 4096 bytes of the answer;
     `(0, b"")` for no answer."""
+    status, raw, _retry_after = request(method, path, token, body)
+    return status, raw
+
+
+def request(
+    method: str, path: str, token: str, body: dict | None
+) -> tuple[int, bytes, float | None]:
+    """`exchange`, plus the answer's `Retry-After` in seconds (None when absent
+    or when there was no answer)."""
     conn = connection()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -326,9 +354,10 @@ def exchange(method: str, path: str, token: str, body: dict | None) -> tuple[int
             conn.sock.settimeout(READ_TIMEOUT_SECONDS)
         conn.request(method, path, body=encoded, headers=headers)
         response = conn.getresponse()
-        return response.status, response.read(4096)
+        retry_after = retry_after_seconds(response.getheader("Retry-After"))
+        return response.status, response.read(4096), retry_after
     except (OSError, socket.timeout, http.client.HTTPException):
-        return 0, b""
+        return 0, b"", None
     finally:
         try:
             conn.close()

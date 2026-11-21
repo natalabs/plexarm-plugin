@@ -12,7 +12,8 @@
 # Where it looks, in order — the first non-empty answer wins:
 #   1. macOS Keychain        /usr/bin/security find-generic-password -s plexarm-api-token -w
 #   2. Linux Secret Service  /usr/bin/secret-tool lookup service plexarm-api-token
-#   3. A file                $HOME/.config/plexarm/token, mode 600 or 400, owned by you
+#   3. A file                $HOME/.config/plexarm/token, mode 600 or 400, owned by you,
+#                            in a folder no other account can write to
 #
 # It never takes the token as an argument, never reads it from the environment,
 # never writes it anywhere, and never contacts the network.
@@ -26,12 +27,21 @@ IFS='
 set -u
 
 # The home directory comes from the password database, not the environment.
+# A name the database cannot resolve leaves no file store, except under a
+# Windows shell (Git Bash, MSYS, Cygwin): there a name can hold a space and the
+# file is the only store, so the HOME the client passed is kept.
+pw_home=
 me_name=$(/usr/bin/id -un 2>/dev/null) || me_name=
 case "$me_name" in
   ''|*[!A-Za-z0-9._-]*) ;;
-  *) eval "pw_home=~$me_name"
-     case "$pw_home" in
-       /*) HOME=$pw_home; export HOME ;;
+  *) eval "pw_home=~$me_name" ;;
+esac
+case "$pw_home" in
+  /*) HOME=$pw_home; export HOME ;;
+  *) os=$(/usr/bin/uname -s 2>/dev/null) || os=$(/bin/uname -s 2>/dev/null) || os=
+     case "$os" in
+       MINGW*|MSYS*|CYGWIN*) ;;
+       *) HOME= ;;
      esac ;;
 esac
 
@@ -84,15 +94,16 @@ fi
 # 4. A plain file — the headless / no-Secret-Service concession, not a peer
 # ─────────────────────────────────────────────────────────────────────────────
 # There is deliberately no variable naming the file.
-file=${HOME-}$TOKEN_FILE_SUFFIX
-if [ -z "$token" ] && [ -f "$file" ]; then
+file=
+[ -n "${HOME-}" ] && file=$HOME$TOKEN_FILE_SUFFIX
+if [ -z "$token" ] && [ -n "$file" ] && [ -f "$file" ]; then
   mode=$(/usr/bin/stat -f '%Lp' "$file" 2>/dev/null) || mode=$(/usr/bin/stat -c '%a' "$file" 2>/dev/null) || mode=
   owner=$(/usr/bin/stat -f '%u' "$file" 2>/dev/null) || owner=$(/usr/bin/stat -c '%u' "$file" 2>/dev/null) || owner=
   me=$(/usr/bin/id -u) || me=
   dir=${file%/*}
   dir_mode=$(/usr/bin/stat -f '%Lp' "$dir" 2>/dev/null) || dir_mode=$(/usr/bin/stat -c '%a' "$dir" 2>/dev/null) || dir_mode=
   case "$dir_mode" in
-    *[2367]) note "$dir can be written by other accounts. Run: chmod 700 $dir"
+    *[2367]|*[2367]?) note "$dir can be written by other accounts. Run: chmod 700 $dir"
        emit "$SENTINEL" ;;
   esac
   # The permission bits are the only protection a plain file has, so a file

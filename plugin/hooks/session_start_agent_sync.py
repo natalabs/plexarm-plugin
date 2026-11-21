@@ -46,10 +46,11 @@ session, it sends nothing and says so in one line.
 
 A session nobody is attending fires this hook before any folder trust question
 and no person sees what it says. So it sends no repository agents, and only a
-start sends at all.
+start sends at all. A client that does not say whether anyone is attending
+sends no repository agents either.
 
 `PLEXARM_AGENT_SYNC` can only turn the sync off. `CLAUDE_CODE_SESSION_ATTENDED`
-can only keep repository agents from being sent. `CLAUDE_PID` is compared with the
+decides only whether repository agents are sent. `CLAUDE_PID` is compared with the
 session's process id, and a mismatch can only stop the sync. No value of any of
 them changes where a byte goes.
 
@@ -125,7 +126,7 @@ except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
         path = os.path.join(home, STORE_FILE)
         try:
             info = os.stat(path)
-            if os.stat(os.path.dirname(path)).st_mode & 0o002:
+            if os.stat(os.path.dirname(path)).st_mode & 0o022:
                 return None
             if (info.st_mode & 0o170000) != 0o100000:
                 return None
@@ -356,7 +357,11 @@ def _process_argv(pid: int) -> list[str] | None:
     try:
         if sys.platform.startswith("linux"):
             with open(f"/proc/{pid}/cmdline", "rb") as handle:
-                raw = handle.read(MAX_ARGV_BYTES)
+                raw = handle.read(MAX_ARGV_BYTES + 1)
+            # A command line longer than the cap is unknown: cut short, it
+            # would read as one without its later flags.
+            if len(raw) > MAX_ARGV_BYTES:
+                return None
             parts = raw.split(b"\0")
             if parts and parts[-1] == b"":
                 parts.pop()
@@ -366,7 +371,9 @@ def _process_argv(pid: int) -> list[str] | None:
 
             system = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
             # CTL_KERN, KERN_PROCARGS2: argc, the executable path, padding,
-            # then argc NUL-terminated arguments.
+            # then argc NUL-terminated arguments. A buffer cut at the cap that
+            # ends before the last of them reads as None below, never as a
+            # shorter command line.
             mib = (ctypes.c_int * 3)(1, 49, pid)
             size = ctypes.c_size_t(0)
             if system.sysctl(mib, 3, None, ctypes.byref(size), None, ctypes.c_size_t(0)) != 0:
@@ -441,6 +448,12 @@ def _process_cwd(pid: int) -> str | None:
     return None
 
 
+def _is_shell(argv: list[str]) -> bool:
+    """Whether a command line is one of `_SHELLS`; a login shell's `-` is not
+    part of its name."""
+    return bool(argv) and os.path.basename(argv[0]).lstrip("-") in _SHELLS
+
+
 def _session_process() -> tuple[int, list[str]] | None:
     """The Claude Code process that ran this hook, as `(pid, argv)`, or None.
 
@@ -449,12 +462,14 @@ def _session_process() -> tuple[int, list[str]] | None:
     """
     pid = os.getppid()
     argv = _process_argv(pid)
-    if argv is not None and os.path.basename(argv[0]) in _SHELLS and argv[1:2] == ["-c"]:
+    if argv is not None and _is_shell(argv) and argv[1:2] == ["-c"]:
         parent = _process_parent(pid)
         if parent is None:
             return None
         pid, argv = parent, _process_argv(parent)
-    if argv is None:
+    # Still a shell: a nested one, whose command line says nothing about the
+    # session's setting sources.
+    if argv is None or _is_shell(argv):
         return None
     claimed = os.environ.get(SESSION_PID_ENV)
     if claimed is not None and claimed.strip() != str(pid):
@@ -500,7 +515,9 @@ def _setting_sources(argv: list[str]) -> frozenset | None:
     return names
 
 
-#: Claude Code says whether anyone is attending the session; "0" means nobody is.
+#: Claude Code says whether anyone is attending the session; "0" means nobody
+#: is. A client that does not set it says nothing, so repository agents are sent
+#: only on "1".
 ATTENDED_ENV = "CLAUDE_CODE_SESSION_ATTENDED"
 
 
@@ -633,8 +650,10 @@ def _agent_dirs(cwd: str, scopes: frozenset, project_env: bool = True) -> list[t
     """`(scope, directory)` for each place Claude Code reads agent definitions
     from, among the `scopes` this session loaded.
 
-    User-level first, then project-level, matching the client's own two
-    locations, then the plugin's own. `CLAUDE_PROJECT_DIR` is preferred over the payload's `cwd` when
+    User-level first, then the plugin's own, then project-level, so a
+    repository holding more files than `MAX_AGENTS_SENT` cannot keep the
+    plugin's agents from being read. Which file wins is `_resolve`'s rule, not
+    this order. `CLAUDE_PROJECT_DIR` is preferred over the payload's `cwd` when
     set, because a session started in a subdirectory has a `cwd` below the
     project root and would miss `<root>/.claude/agents`. `--report` passes
     `project_env=False`: it is run from an agent's shell, not by Claude Code, so
@@ -645,6 +664,8 @@ def _agent_dirs(cwd: str, scopes: frozenset, project_env: bool = True) -> list[t
         home = _user_home()
         if home:
             dirs.append((SCOPE_USER, os.path.join(home, ".claude", "agents")))
+    if SCOPE_PLUGIN in scopes:
+        dirs.append((SCOPE_PLUGIN, _plugin_agents_dir()))
     if SCOPE_REPO in scopes:
         project = (os.environ.get("CLAUDE_PROJECT_DIR") if project_env else None) or cwd
         if project:
@@ -652,8 +673,6 @@ def _agent_dirs(cwd: str, scopes: frozenset, project_env: bool = True) -> list[t
             repo_agents = os.path.join(root, ".claude", "agents")
             if os.path.realpath(repo_agents) == repo_agents:
                 dirs.append((SCOPE_REPO, repo_agents))
-    if SCOPE_PLUGIN in scopes:
-        dirs.append((SCOPE_PLUGIN, _plugin_agents_dir()))
     # De-duplicate while preserving order — a session whose project is the home
     # directory would otherwise read the same tree twice, once per scope.
     seen: set[str] = set()
@@ -850,8 +869,7 @@ def sync(token: str, agents: list[dict]) -> tuple[int, dict]:
     """`POST /records/sync-agents`. Returns `(status, body)`; status 0 = no answer.
 
     Two timeouts, separately, because they fail at different times and one number
-    cannot express both. **No retry** — the failure direction is already safe and
-    the next session start tries again anyway.
+    cannot express both. **No retry** — the next session start tries again.
     """
     body = json.dumps({"agents": agents})
     connection = _connection()
@@ -1118,7 +1136,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     session = _session_argv()
-    headless = os.environ.get(ATTENDED_ENV) == "0" or (session is not None and _headless(session))
+    attended = os.environ.get(ATTENDED_ENV)
+    headless = attended == "0" or (session is not None and _headless(session))
     if headless and event != "startup" and not report:
         return 0
 
@@ -1137,7 +1156,7 @@ def main(argv: list[str] | None = None) -> int:
     # The plugin's agents load whenever the plugin does, and this hook runs
     # only when it is loaded: no setting source decides them.
     scopes = scopes | {SCOPE_PLUGIN}
-    if headless:
+    if headless or attended != "1":
         scopes = scopes - {SCOPE_REPO}
 
     # An unreadable session folder under `--report` is no folder: no repository scope.

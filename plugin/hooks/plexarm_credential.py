@@ -70,7 +70,7 @@ def _file_token() -> str | None:
     path = pathlib.Path(home) / STORE_FILE
     try:
         info = path.stat()
-        if path.parent.stat().st_mode & stat.S_IWOTH:
+        if path.parent.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH):
             return None
     except OSError:
         return None

@@ -218,7 +218,7 @@ If no token is stored, or Plexarm cannot be reached or does not answer normally,
 The session that first adds the team to the roster adds one line to the session saying the team is installed and to dispatch the General Manager first for a job that spans more than one discipline. It reads only the
 folders the session loads: a session started with `--setting-sources` reads `~/.claude/agents/`
 only when the list includes `user`, and `.claude/agents/` only when it includes `project`. Where it
-cannot tell which folders the session loaded, it sends none. Because `~/.claude/agents/` is not tied
+cannot tell which folders the session loaded, it sends none. A session that Claude Code does not report as attended by a person sends none of this project's agents. Because `~/.claude/agents/` is not tied
 to one project, the names of agents you keep there for other projects reach your Plexarm account
 too. Switch off: `PLEXARM_HOOKS_OFF=session_start_agent_sync`; the agents stay available.
 

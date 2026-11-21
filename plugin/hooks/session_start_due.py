@@ -94,7 +94,7 @@ except BaseException:  # noqa: BLE001 - a hook must not fail on its own imports
         path = os.path.join(home, STORE_FILE)
         try:
             info = os.stat(path)
-            if os.stat(os.path.dirname(path)).st_mode & 0o002:
+            if os.stat(os.path.dirname(path)).st_mode & 0o022:
                 return None
             if (info.st_mode & 0o170000) != 0o100000:
                 return None
